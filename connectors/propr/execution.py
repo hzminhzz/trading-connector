@@ -14,10 +14,13 @@ class OrderRequest:
     reduce_only: bool = False
     order_type: str = "market"
     limit_price: Decimal | None = None
+    position_id: str | None = None
 
     def validate(self, instrument):
         if self.side not in ("buy", "sell") or self.position_side not in ("long", "short"):
             raise ValueError("Invalid side")
+        if self.reduce_only and not self.position_id:
+            raise ValueError("Reduce-only requires exact native position ID")
         if self.order_type not in ("market", "limit"):
             raise ValueError("Unsupported order type")
         if self.order_type == "limit" and self.limit_price is None:
@@ -55,7 +58,8 @@ class FakeExecutionGateway:
         instrument = self.registry.by_canonical[request.asset]
         request.validate(instrument)
         intent = self.journal.stage(request.account_id, request.asset, request.side,
-                                    request.position_side, request.quantity, request.reduce_only)
+                                    request.position_side, request.quantity, request.reduce_only,
+                                    request.position_id)
         try:
             status = await self.venue.submit(intent, request)
         except (TimeoutError, ConnectionError):

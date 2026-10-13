@@ -57,9 +57,11 @@ class FakeLifecycleGateway(FakeExecutionGateway):
         self.journal.mark(original_intent_id, "unknown")
         status = await self.cancel(original_intent_id)
         if status != "cancelled":
+            self.journal.mark(original_intent_id, "unknown")
             raise UnknownOutcome("Replace aborted: old order may have filled")
         # Reject if any partial fill occurred, even when cancellation succeeded.
         if self.venue.filled_quantities.get(original_intent_id, Decimal(0)) != 0:
+            self.journal.mark(original_intent_id, "unknown")
             raise UnknownOutcome("Replace aborted: partial fill during cancel gap")
         return await self.submit(request)
 
@@ -71,5 +73,6 @@ class FakeLifecycleGateway(FakeExecutionGateway):
             raise ValueError("Invalid reduction size")
         side = "sell" if position.side == "long" else "buy"
         request = OrderRequest(position.account_id, position.asset, side,
-                               position.side, quantity, reduce_only=True)
+                               position.side, quantity, reduce_only=True,
+                               position_id=position.id)
         return await self.submit(request)

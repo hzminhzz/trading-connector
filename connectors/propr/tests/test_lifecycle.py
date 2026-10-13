@@ -56,6 +56,7 @@ def test_reduce_native_position_side(tmp_path):
         intent, status = await gateway.reduce("short-1", D("1"))
         assert status == "accepted"
         assert intent.side == "buy" and intent.position_side == "short" and intent.reduce_only
+        assert intent.position_id == "short-1"
         with pytest.raises(ValueError):
             await gateway.reduce("short-1", D("3"))
         with pytest.raises(UnknownOutcome):
