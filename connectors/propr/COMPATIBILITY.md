@@ -7,6 +7,10 @@
 - The implemented HTTP transport is read-only. `TransportPolicy(allow_mutations=True)` is an internal testing primitive only, not production arming; do not instantiate it with a real network client.
 - No provider account snapshot or actual execution has been verified.
 
+## Verified ML4T interface
+
+Inspected installed `ml4t-live==0.1.2` `ml4t.live.protocols` directly. `AsyncBrokerProtocol` requires cached `positions`, `pending_orders`, `is_connected`, `execution_capabilities`; async lifecycle `connect`, `disconnect`, `is_connected_async`; account/position/order queries; `submit_order_async(asset, quantity, side=None, order_type=MARKET, limit_price=None, stop_price=None, **kwargs)`, `cancel_order_async`, `replace_order_async`, `close_position_async`; and `assert_paper_trading`/`assert_live_trading`. `DataFeedProtocol` requires `start`, `stop`, `__aiter__`, `__anext__` yielding `FeedItem` (prefer validated `MarketEvent`). Fifteen optional contract tests passed against the installed version.
+
 ## Outstanding issue #1 checks
 
-Inspect and record exact `AsyncBrokerProtocol`, `DataFeedProtocol`, order and capability signatures from installed source; compare with Propr official API and WS schemas; add contract tests. Until then #1 remains open.
+Verify Propr official API and WS schema fields and the documented SDK version against primary sources, then complete compatibility tests. Until then #1 remains open.
