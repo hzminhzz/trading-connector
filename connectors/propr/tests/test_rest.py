@@ -20,8 +20,8 @@ def test_read_only_transport_rejects_post_before_network():
 
 def test_pagination_works_past_twenty():
     def handler(request):
-        page = int(request.url.params["page"])
-        rows = list(range((page-1)*20, min(page*20, 43)))
+        offset = int(request.url.params["offset"])
+        rows = list(range(offset, min(offset+20, 43)))
         return httpx.Response(200, json={"data": rows})
     async def run():
         rest = ProprRest("https://api.beta.propr.xyz/v1", "dummy", transport=httpx.MockTransport(handler))

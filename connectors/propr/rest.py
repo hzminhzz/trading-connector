@@ -19,7 +19,7 @@ class ProprRest:
         self.policy = policy or TransportPolicy()
         self.client = httpx.AsyncClient(
             base_url=base_url, timeout=httpx.Timeout(10.0),
-            headers={"Authorization": f"Bearer {api_key}"},
+            headers={"X-API-Key": api_key},
             transport=transport,
         )
 
@@ -37,13 +37,13 @@ class ProprRest:
             raise RemoteAPIError("Provider transport failure") from exc
 
     async def pages(self, path: str, *, page_size: int = 20):
-        """Page/limit convention is provisional pending provider contract confirmation."""
+        """Fetch complete documented limit/offset pages."""
         if page_size < 1:
             raise ValueError("Invalid page size")
         result = []
-        page = 1
+        offset = 0
         while True:
-            data = await self.request("GET", path, params={"page": page, "limit": page_size})
+            data = await self.request("GET", path, params={"offset": offset, "limit": page_size})
             if isinstance(data, dict):
                 rows = data.get("data")
                 if not isinstance(rows, list):
@@ -55,8 +55,8 @@ class ProprRest:
             result.extend(rows)
             if len(rows) < page_size:
                 return result
-            page += 1
-            if page > 10000:
+            offset += len(rows)
+            if offset > 200000:
                 raise RemoteAPIError("Pagination safety limit")
 
     async def close(self):
