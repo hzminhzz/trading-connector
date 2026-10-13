@@ -1,17 +1,21 @@
-"""Fail-closed account event reconciliation; transport-independent, no order mutations.
+"""Conservative account-event reconciliation, independent of network mutation.
 
-No provider replay or atomic REST/WS snapshot guarantees are assumed.
+No replay cursor or atomic snapshot boundary is promised by Propr. Stable
+consecutive REST snapshots reduce but cannot eliminate undetected races;
+remote orders remain disabled.
 """
-from dataclasses import dataclass
 from collections import deque
+from dataclasses import dataclass
 from time import monotonic
 
 from .state import UnknownOutcome
+
 
 @dataclass(frozen=True)
 class AuditEvent:
     kind: str
     detail: str
+
 
 class AccountReconciler:
     def __init__(self, inventory_reader, journal, *, stale_after=30.0, clock=monotonic):
@@ -26,18 +30,25 @@ class AccountReconciler:
         self.last_heartbeat = None
         self.snapshot = None
         self.seen = set()
+        self.seen_order = deque()
+        self.max_seen = 10000
+        self.revision = 0
         self.audit = deque(maxlen=1000)
 
     def disconnected(self):
+        self.revision += 1
         self.connected = False
         self.ready = False
         self.audit.append(AuditEvent("connection", "disconnected; openings halted"))
+        self.journal.audit("account_connection", "disconnected")
 
     def connected_unverified(self):
+        self.revision += 1
         self.connected = True
         self.ready = False
         self.last_heartbeat = self.clock()
         self.audit.append(AuditEvent("connection", "connected; snapshot required"))
+        self.journal.audit("account_connection", "connected; unverified")
 
     def heartbeat(self):
         if not self.connected:
@@ -52,26 +63,40 @@ class AccountReconciler:
             raise UnknownOutcome("Invalid event identity")
         if event_id in self.seen:
             return False
+        if len(self.seen_order) >= self.max_seen:
+            oldest = self.seen_order.popleft()
+            self.seen.remove(oldest)
+        self.seen_order.append(event_id)
         self.seen.add(event_id)
-        # Without provider ordering/replay guarantees, any state mutation requires
-        # a new authoritative snapshot before opening exposure.
+        self.revision += 1
+        # Every event invalidates prior snapshots until reconciliation.
         self.ready = False
         self.audit.append(AuditEvent("event", f"{event_type}: snapshot required"))
+        self.journal.audit("account_event", "state changed; reconciling")
         return True
 
     async def refresh(self):
         self.ready = False
         if not self.connected:
             raise UnknownOutcome("Cannot reconcile disconnected stream")
-        candidate = await self.reader.snapshot()
+        revision = self.revision
         if self.journal.has_unknown():
             self.audit.append(AuditEvent("reconciliation", "unknown intents remain"))
             raise UnknownOutcome("Unknown order intent requires independent confirmation")
-        self.snapshot = candidate
+        first = await self.reader.snapshot()
+        second = await self.reader.snapshot()
+        if first != second:
+            self.audit.append(AuditEvent("reconciliation", "REST snapshots inconsistent"))
+            self.journal.audit("reconciliation", "inconsistent REST snapshot")
+            raise UnknownOutcome("Account changed during REST reconciliation")
+        if self.journal.has_unknown() or not self.connected or revision != self.revision:
+            raise UnknownOutcome("Account changed during reconciliation")
+        self.snapshot = second
         self.last_heartbeat = self.clock()
         self.ready = True
-        self.audit.append(AuditEvent("reconciliation", "REST inventory refreshed"))
-        return candidate
+        self.audit.append(AuditEvent("reconciliation", "two REST inventories matched"))
+        self.journal.audit("reconciliation", "matched two read-only snapshots")
+        return second
 
     def assert_opening_safe(self):
         if (not self.connected or not self.ready or self.last_heartbeat is None

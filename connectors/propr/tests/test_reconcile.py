@@ -38,7 +38,7 @@ def test_reconnect_duplicate_event_and_stale(tmp_path):
         r.connected_unverified()
         await r.refresh()
         r.assert_opening_safe()
-        assert reader.calls == 3
+        assert reader.calls == 6
     asyncio.run(run())
     journal.close()
 
