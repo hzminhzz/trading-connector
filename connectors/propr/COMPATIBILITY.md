@@ -1,16 +1,36 @@
-# Propr compatibility evidence (work in progress)
+# Propr connector compatibility record
 
-- Inspected local `ml4t-live` distribution in `/home/quant/dev/quant/quant-research/.venv`: version **0.1.2** (verified with `importlib.metadata`).
-- Propr website SDK plan references **v0.1.0**, but current REST and WS response shapes remain **unverified**.
-- Propr Beta environment is **not proven simulation-only**. `assert_paper_trading` fails closed and all remote mutations are disabled.
-- REST `limit`/`offset` pagination and `X-API-Key` header are documented in the official API reference. Exact challenge-attempt account mapping and response shape still require authenticated verification.
-- The implemented HTTP transport is read-only. `TransportPolicy(allow_mutations=True)` is an internal testing primitive only, not production arming; do not instantiate it with a real network client.
-- No provider account snapshot or actual execution has been verified.
+**Document source pinned:** [XBorgLabs/propr-docs at `fee880982ce3cf36f330fb07a3a9be57ec4dd904`](https://github.com/XBorgLabs/propr-docs/tree/fee880982ce3cf36f330fb07a3a9be57ec4dd904). These are *documented contracts*, not proof of authenticated Beta compatibility.
 
-## Verified ML4T interface
+| Component | Inspected version/source | Implemented boundary |
+| --- | --- | --- |
+| Propr Python SDK | official `python/propr_sdk.py` `__version__=0.1.0` | Avoid SDK's first-active-account implicit selection and fresh intent IDs on each retry |
+| Propr REST | official `docs/api.md` at SHA above | HTTPS, `X-API-Key`, `limit/offset` GET pagination; POST/PUT/PATCH/DELETE blocked |
+| Propr authenticated WS | official `docs/websocket.md` at SHA above | WSS, `X-API-Key`, `connected.data.userId` handshake, server ping 20s |
+| ml4t-live | **0.1.2** installed at `/home/quant/dev/quant/quant-research/.venv` | Actual `AsyncBrokerProtocol`, `DataFeedProtocol`, `LiveEngine` signatures inspected; integration tests |
+| Independent reference bars | Binance spot WSS closed-kline `<symbol>@kline_1m` | Typed ML4T `MarketEvent` with timestamps, sequence and gap/staleness checks |
 
-Inspected installed `ml4t-live==0.1.2` `ml4t.live.protocols` directly. `AsyncBrokerProtocol` requires cached `positions`, `pending_orders`, `is_connected`, `execution_capabilities`; async lifecycle `connect`, `disconnect`, `is_connected_async`; account/position/order queries; `submit_order_async(asset, quantity, side=None, order_type=MARKET, limit_price=None, stop_price=None, **kwargs)`, `cancel_order_async`, `replace_order_async`, `close_position_async`; and `assert_paper_trading`/`assert_live_trading`. `DataFeedProtocol` requires `start`, `stop`, `__aiter__`, `__anext__` yielding `FeedItem` (prefer validated `MarketEvent`). Fifteen optional contract tests passed against the installed version.
+## Provider schema (as published)
 
-## Outstanding issue #1 checks
+* Account: `GET /accounts/{accountId}`, `balance`, `availableBalance`, `totalUnrealizedPnl`, `isolatedPositionMargin`, `crossPositionMargin`, `crossOrderMargin`, `isolatedOrderMargin`, `totalInitialMargin`, `totalMaintenanceMargin`. SDK defines equity as balance + unrealized PnL + isolated position margin. The connector does not call available balance spot cash.
+* Orders: `orderId`, `intentId`, `accountId`, `asset`, `side`, `positionSide`, `status`, `quantity`, `cumulativeQuantity`, `averageFillPrice`, `createdAt`, `updatedAt`; status `partially_filled` is distinct from `filled`.
+* Positions: `positionId`, `asset`, `positionSide`, `quantity`, `leverage`, `marginMode`, `entryPrice`, `markPrice`, `marginUsed`, `liquidationPrice`, `createdAt`.
+* Trades: `tradeId`, `orderId`, `positionId`, `executedAt`, `quantity`, `price`, `fee`.
+* Native symbol format: BTC not BTC/USDC; case-sensitive HIP-3 `xyz:AAPL`. Explicit registry with Decimal size/tick metadata; never infer lot metadata from names.
+* Conditional orders: native `positionId` or grouped entry; batch groups require ULID `orderGroupId`. These are **not exposed** for real mutations.
+* Order create accepts ULID `intentId`; 400 cancel is not proof of absence, and 201 is a documented cancel success. Real remote mutations remain off.
+* Socket events carry `type`, `userId`, `data`, `timestamp`; no authenticated sequence replay guarantee is documented. Reconnect forces two matching complete REST inventories and unresolved-intent checks.
 
-Verify Propr official API and WS schema fields and the documented SDK version against primary sources, then complete compatibility tests. Until then #1 remains open.
+## Installed ML4T 0.1.2 protocol
+
+`AsyncBrokerProtocol`: `positions`, `pending_orders`, `is_connected`, `execution_capabilities`; `connect`, `disconnect`, `is_connected_async`, `get_positions_async`, `get_pending_orders_async`, `get_position_async`, `get_account_value_async`, `get_cash_async`, `submit_order_async(asset,quantity,side,order_type,limit_price,stop_price,**kwargs)`, `cancel_order_async`, `replace_order_async`, `close_position_async`, `assert_paper_trading`, `assert_live_trading`. `LiveEngine(strategy, broker, feed, halt_on_unhealthy=True)` is tested with the same Strategy class and a shadow order.
+
+`DataFeedProtocol`: `start`, `stop`, `__aiter__`, `__anext__`, with validated `MarketEvent`; independent Binance spot bars are *reference-only* and are not equivalent to Hyperliquid execution prices. No extrapolation to CFD/perp fill prices is permitted.
+
+## Unresolved provider attestations
+
+1. **Beta is not proven paper/simulation-only.** Neither a Beta URL nor a key prefix guarantees no monetary or evaluation consequences. See [BETA_SAFETY.md](BETA_SAFETY.md).
+2. No Beta account ID or key is available in the active VPS workspace environment as of the verification attempt. The prior shared key was not transferred into this process. Only anonymous `GET /health` was tested successfully.
+3. Authenticated schemas, order/position reconciliations, challenge reset timezone and rule field mapping, and WebSocket event sequencing need real read-only Beta evidence.
+4. No verified point-in-time instrument min step/tick rules, no production market-data/quote parity, no remote stop/TP or order mutation qualification.
+5. No 4-week paper record. **Production = NO-GO.**

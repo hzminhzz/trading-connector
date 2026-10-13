@@ -1,27 +1,15 @@
-# Propr implementation status
+# Propr implementation status — 2026-10-13
 
-Date: 2026-10-13
+**Source state:** active milestone branch `feat/propr-connector`, draft PR #13.
 
-## Verified locally
-- Python safety configuration: Beta/production endpoint and credential segregation; all remote execution disabled.
-- Explicit native/canonical symbol mapping and Decimal tick/lot checks.
-- Native order and position models with rejection of ambiguous one-way position views.
-- SQLite intent journal with crash recovery of staged commands to unknown state.
-- Basic manually resettable risk gate.
-- Async HTTP client with enforced read-only transport, timeout/error classification, and preliminary page/limit pagination.
-- 20 credential-free unit tests passed using python -m pytest -q connectors/propr/tests.
+| Area | Working implementation | Missing qualification |
+| --- | --- | --- |
+| Identity and transport | Explicit environment, account binding, read-only HTTPS | Authenticated Beta account inspection and response conformity |
+| Native inventory | Documented `orderId/positionId/tradeId` fields, full pages, Decimal and one-way guard | Live account, pagination shift evidence |
+| Order state | SQLite WAL with ULID intent, unknown-on-crash; fake-only lifecycle | Real transport deliberately unavailable, more partial-fill/replay evidence |
+| WS state | Read-only WSS, authenticated handshake, bounded recovery; reconciler requires stable double REST snapshot | Read-only Beta WS smoke; provider sequencing/replay semantics not certified |
+| Shadow | Pure shadow decisions, journal/audit, fake risk; ML4T 0.1.2 unchanged Strategy integration | Multi-day real reference feed/production parity |
+| Risk | Explicit verified-input policy and fake kill switch | Account-specific verified challenge rules, daily reset behavior, live flatten path |
+| Release | Read-only runbook and NO-GO report | Beta isolation certification, four-week paper, explicit live approval |
 
-## NOT qualified / must not be represented as completed issues
-- No authoritative Beta simulation-only guarantee.
-- Propr REST/WS schemas, pagination and SDK contract not yet independently verified.
-- No read-only authenticated Beta account snapshot.
-- No safe order execution gateway, cancel/replace/reduce-only integration, WS reconciliation or LiveEngine adapter.
-- No real provider-verified order lifecycle tests or four weeks of paper operation.
-- No production authorization. Production readiness: NO-GO.
-
-## Next implementation sequence
-1. Verify exact Propr SDK/REST/WS and installed ml4t-live signatures against source; update compatibility matrix and HTTP parsing.
-2. Complete issue #1 and #2 acceptance tests and source evidence.
-3. Add account health and inventory mapping, mocked contract fixtures and read-only Beta diagnostics.
-4. Implement and test idempotent gateway, cancel/replace, WS state reconciliation, shadow, optional ML4T bridge, risk and release assessment.
-5. Run complete tests, independent review, commit/PR only on satisfied acceptance criteria.
+The previously shared Propr Beta credential is not set in the current VPS process environment and no project `.env` exists. An unauthenticated Beta health GET responded OK; that does not qualify trading. Never copy credentials into tracked files.

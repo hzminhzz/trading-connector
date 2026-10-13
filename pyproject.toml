@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "trading-connector-library"
+version = "0.1.0"
+description = "Provider-isolated custom trading connectors with read-only safety boundaries"
+requires-python = ">=3.11"
+dependencies = [
+  "httpx>=0.28,<1",
+  "websockets>=14,<18",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8"]
+ml4t = ["ml4t-live==0.1.2"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["connectors*"]
+exclude = ["connectors.*.tests*"]
+namespaces = true
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]
+
+[tool.pytest.ini_options]
+testpaths = ["connectors"]
