@@ -4,6 +4,8 @@ from decimal import Decimal as D
 
 import pytest
 
+pytest.importorskip("ml4t.live", reason="Optional ML4T integration not installed")
+
 from connectors.propr.account import AccountSnapshot
 from connectors.propr.feed import ValidatedExternalFeed, binance_completed_kline
 from connectors.propr.inventory import Inventory

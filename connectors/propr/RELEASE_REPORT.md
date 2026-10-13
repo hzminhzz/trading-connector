@@ -4,6 +4,8 @@ Date: 2026-10-13. Repository: `hzminhzz/trading-connector`, milestone Propr Conn
 
 **Decision: NO-GO for any remote order mutation or live deployment.** No remote orders, cancels, leverage changes or flatten requests have been made.
 
+Reproducible local checks: **89 passed** with installed ML4T 0.1.2; **69 passed, 16 skipped** in the baseline Python environment without ML4T; Ruff checks passed; `uv build --offline` built sdist and wheel. The GitHub Actions credential-free workflow is committed; GitHub-hosted CI status must be checked separately after push.
+
 | Gate | Evidence | Disposition |
 | --- | --- | --- |
 | P0 API contract | Official Propr SDK/docs pinned; ml4t-live 0.1.2 inspected; credential-free tests | Source-level evidence, still needs authenticated schema confirmation |

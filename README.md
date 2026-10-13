@@ -8,7 +8,7 @@ A home for reusable, independently testable connectors to trading venues, broker
 
 | Provider | Status | Documentation | Implementation |
 | --- | --- | --- | --- |
-| [Propr](connectors/propr/) | Planned; API and safety semantics require qualification | [Plan](connectors/propr/PLAN.md) | Not implemented |
+| [Propr](connectors/propr/) | Read-only and synthetic-shadow candidate; remote execution **NO-GO** | [Runbook](connectors/propr/OPERATOR_RUNBOOK.md), [Release report](connectors/propr/RELEASE_REPORT.md), [Plan](connectors/propr/PLAN.md) | [Provider code](connectors/propr/README.md) |
 
 Additional providers are added under `connectors/<provider>/` without coupling their logic to Propr or another provider.
 
@@ -21,22 +21,16 @@ Additional providers are added under `connectors/<provider>/` without coupling t
 - **Safety:** no trading actions from repository setup, import, test discovery, or read-only diagnostics. All mutation-capable tests are explicitly gated.
 - **Secrets:** credentials belong in the environment or a secret manager; do not commit `.env`, API keys, positions, account identifiers, or raw authenticated responses.
 
-## Proposed structure
+## Build and test
 
-```text
-trading-connector/
-├── README.md
-├── AGENTS.md
-├── docs/
-│   └── architecture.md
-└── connectors/
-    └── propr/
-        ├── README.md
-        └── PLAN.md
+The base package installs with `pip install -e ".[test]"`. ML4T is optional, pinned to the locally inspected `ml4t-live==0.1.2` adapter boundary. The default GitHub Actions workflow uses only credential-free fixtures.
+
+```bash
+python -m pytest -q connectors/propr/tests
+python -m ruff check connectors/propr
+uv build --offline
 ```
-
-The files listed above are documentation only; implementation packages and tests will be added per provider after its plan is approved.
 
 ## Development status
 
-This repository was initialized with documentation and the Propr connector plan. **No trading connector code has been deployed and no orders have been placed through this repository.**
+Propr has a packaged read-only REST gateway, conservative WebSocket reconciliation, synthetic order/kill-switch drills, shadow decisions and an optional ML4T LiveEngine integration. **No remote order calls are implemented or authorized.** The production decision remains **NO-GO** until Beta safety evidence, authenticated account verification, four weeks of paper trading and a separate explicit approval exist. See the [qualification report](connectors/propr/RELEASE_REPORT.md).
