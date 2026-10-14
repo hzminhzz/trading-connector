@@ -21,7 +21,7 @@ Date: 2026-10-14. Repository: `hzminhzz/trading-connector`, milestone Propr Conn
 | --- | --- | --- |
 | API and framework contract | Pinned Propr docs; inspected installed ML4T 0.1.2 interfaces | Implemented and tested |
 | Account identity | Authenticated health, active challenge discovery, exact account binding and complete read-only snapshot | VERIFIED for read-only access only |
-| Account execution class | Public wording does not establish risk-free routing, fees or evaluation/funded-balance effects for this challenge account | UNVERIFIED; mutation gate remains closed |
+| Account execution class | [Homepage](https://www.propr.xyz/) says trader orders are simulated signals and Propr may copy them to a live venue; maximum trader loss is the challenge fee. [SDK page](https://www.propr.xyz/developers/python-sdk) calls production real-funds trading; exact API `/orders` semantics for this account remain unclear | Partially documented; obtain Propr confirmation before any mutation |
 | Inventory | Authenticated account-bound read-only snapshot; zero orders, positions and trades | VERIFIED at check time |
 | Intent lifecycle / WebSocket | Deterministic synthetic tests; remote order transport absent | Fixture-qualified only |
 | ML4T shadow integration | Actual project strategy plus target-weight conversion produced one audited shadow decision | Smoke passed; no production price parity claim |
@@ -33,4 +33,4 @@ Date: 2026-10-14. Repository: `hzminhzz/trading-connector`, milestone Propr Conn
 
 Remote market/limit orders, cancellation, replace, close/flatten, leverage changes, stop-loss/TP submission, native hedge execution and live arming.
 
-The deliverable is a **read-only/synthetic-shadow connector candidate**, not a trading bot. The unresolved account-class evidence and four-week paper requirement remain release blockers for execution; no configuration flag can bypass them.
+Official public materials describe simulated trader accounts and possible Propr-side live copying, but the Python SDK's production warning does not clarify whether API order calls are simulated signals or direct live orders. The challenge fee and evaluation outcome remain at risk. The account-specific API route is unverified, the four-week paper record is unmet, and remote order transport is absent; no configuration flag can bypass these blockers.

@@ -16,7 +16,7 @@
 
 The account source is read from `/book-account-issuances` or `/challenge-attempts?status=active`; the returned `accountId` is then checked against `GET /accounts/{accountId}` and inventory records. No account is inferred from local stale IDs or selected from an arbitrary first result.
 
-Public Propr materials discuss both challenge accounts and real-money production trading, but do not provide a verifiable account-class/order-routing guarantee for this selected challenge. Therefore `assert_paper_trading()` and `assert_live_trading()` refuse, and all remote mutation methods remain absent. A user-provided permission to use an account does not prove that its orders are risk-free.
+Official Propr materials are now clearer about the platform model: the homepage says trader orders are simulated signals that Propr may copy to a live venue, and that the one-time challenge fee is the trader's maximum loss. However, the [Python SDK documentation](https://www.propr.xyz/developers/python-sdk) labels production trading as real-funds execution and exposes order mutations without stating whether this exact account's API `POST /orders` is signal-only. Do not treat the challenge as risk-free or infer the API route from marketing language. `assert_paper_trading()` and `assert_live_trading()` refuse; all remote mutations remain absent until Propr confirms the exact route/account semantics and the separately scoped risks are approved.
 
 ## Important boundaries
 
@@ -31,9 +31,9 @@ Public Propr materials discuss both challenge accounts and real-money production
 | Gate | Evidence required | Current decision |
 | --- | --- | --- |
 | Read-only account | Authenticated health, explicit/unique binding, complete financial fields and reconciled inventory | Can be run with the operator command; do not commit private results |
-| Challenge classification | Authoritative account-class, routing, fees and evaluation/funded-balance consequences | Unverified; order qualification blocked |
-| Shadow | Actual installed ML4T strategy and feed through `LiveEngine`; no mutation; fault/reconciliation checks | Credential-free shadow tests |
-| Paper record | At least four weeks of verified risk-free paper/simulated operation | Not met |
+| Challenge/API classification | Written account-specific confirmation of `/orders` routing, challenge fee and evaluation consequences | Official public materials describe simulated signals and possible live copying, but conflict with SDK production wording; exact API semantics unverified |
+| Shadow | Actual installed ML4T strategy and feed through `LiveEngine`; no mutation; fault/reconciliation checks | Smoke passed |
+| Paper record | At least four weeks of documented operation under explicitly scoped account, fee, evaluation and risk limits | Not met |
 | Live operation | Separate authorization, reviewed limits, reconciliation, kill switch and recovery drills | NO-GO |
 
 If any account-safety evidence is ambiguous, keep the mutation gate closed and report the missing evidence; do not change configuration to bypass it.

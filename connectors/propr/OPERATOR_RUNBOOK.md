@@ -42,11 +42,11 @@
 
 These controls are **not provisioned** for this read-only/shadow candidate:
 
-- **Risk thresholds:** no numeric limits are approved while the challenge rules and account consequences remain unverified. Before any execution review, record account-specific maximum notional, leverage, daily loss and drawdown limits from authoritative rules, plus the approved local caps.
+- **Risk thresholds:** no numeric limits are approved while the exact account rules and API order semantics remain unverified. Propr's FAQ says the one-time challenge fee is the trader's maximum loss; before any execution review, record account-specific maximum notional, leverage, daily loss and drawdown limits from authoritative rules, plus approved local caps.
 - **Alarms:** no delivery channel is configured. Any future deployment must test alerts for stale/disconnected WebSocket, unknown order outcome, failed reconciliation, risk halt and daily-loss/reset events.
 - **Kill switch:** current drills are synthetic. No live cancel/reduce/flatten control exists in this connector.
 - **Cancel/flatten:** if an incident occurs with real positions, stop submissions, use the provider UI for the explicitly selected account, then verify orders, positions and fills through read-only reconciliation. Do not claim flattening until the provider state confirms it.
 
 ## Execution gate
 
-Challenge-account paper semantics and real-money/evaluation consequences are not independently established. Do not submit orders or change leverage. Live execution additionally requires verified account rules, tested limits/recovery, a four-week paper record, explicit scoped authorization and a separate release decision.
+Propr's homepage FAQ says challenge trades are simulated signals that may be copied to a live venue and says the one-time challenge fee is the trader's maximum loss. Its [Python SDK documentation](https://www.propr.xyz/developers/python-sdk) labels production as real-funds execution, without clarifying whether API `POST /orders` is signal-only for this account. Do not submit orders or change leverage until Propr confirms the exact API/account semantics in writing. Account failure and loss of the challenge fee remain possible. Live execution additionally requires verified account rules, tested limits/recovery, a four-week record, explicit scoped authorization and a separate release decision.

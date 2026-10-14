@@ -15,7 +15,7 @@ Milestone: [Propr Connector](https://github.com/hzminhzz/trading-connector/miles
 - Authenticated production read-only smoke: health/core `OK`, unique active challenge account bound, financial fields complete, orders **0**, positions **0**, trades **0**. No account ID, balance or credential was printed or committed.
 - Actual `CryptoTSMOMRegimeStrategy` from `dev/quant/quant-research` ran through ML4T 0.1.2 `LiveEngine` using `ML4TStrategyAdapter`; one synthetic target intent was accepted by the shadow gateway. The finite smoke feed ended in `feed_terminated` degraded state. No remote order endpoint was invoked.
 - Review findings fixed: WebSocket credentials require the exact Propr production endpoint; canonical reductions resolve exact native position IDs; shadow journals retain those IDs; fake lifecycle tests cover per-order batch outcomes, cumulative fills and same-ID restart retries.
-- Public provider wording does not establish that this challenge account is simulated-only or free of monetary/evaluation consequences. The paper assertion and every remote mutation remain blocked.
+- At the time this audit was prepared, reviewed materials did not establish account/API semantics. The subsequent official-source review below narrows but does not clear that blocker.
 - GitHub-hosted checks must be rechecked after the final push.
 
 ## Issue disposition
@@ -37,8 +37,8 @@ Merge only as a read-only/synthetic-shadow connector candidate after final CI ch
 
 ## External execution blockers
 
-1. Obtain authoritative Propr account-class, order-routing, fee and evaluation/funded-balance consequences for this challenge.
-2. Accumulate and verify the required four-week paper record.
+1. Obtain written Propr confirmation whether `POST /accounts/{accountId}/orders` for this selected account creates a simulated trader signal or a live order, and document challenge fee/evaluation consequences.
+2. Accumulate and verify the required four-week paper record under explicitly scoped limits.
 3. Complete provider-specific rules, event-replay, market-price parity and live recovery qualification before any separate execution approval.
 
 ## Post-merge regression follow-up
@@ -47,3 +47,9 @@ Merge only as a read-only/synthetic-shadow connector candidate after final CI ch
 - `FakeLifecycleGateway.replace()` now checks both fill sources and blocks replacement after any fill; a regression test exercises a partial result followed by cancellation.
 - Follow-up verification: **107 passed** with ML4T; **84 passed, 16 skipped** without ML4T; Ruff and offline package build passed.
 - Live execution remains **NO-GO** under the external blockers above.
+
+## Official-source follow-up (2026-10-14)
+
+- Propr's [homepage FAQ](https://www.propr.xyz/) says each trader order runs on a simulated account and is submitted as a signal; Propr may copy it to a live venue. It also says the one-time challenge fee is the trader's maximum loss.
+- The [Python SDK page](https://www.propr.xyz/developers/python-sdk) separately labels production as real-funds trading and documents order/margin mutations. It does not reconcile that warning with the homepage's signal model for the specific account API.
+- Result: public evidence supports simulated trader-side orders and bounds stated trader loss to the challenge fee, but exact `/orders` behavior for this account needs written provider confirmation. The challenge is not risk-free; account evaluation can be lost. No remote mutation is enabled.
