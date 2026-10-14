@@ -1,29 +1,36 @@
-# Propr connector
+# Propr connector (read-only and synthetic-shadow candidate)
 
-**Status: planned; no implementation, no live orders.**
+**Remote order execution: NO-GO.** This is one provider in the [multi-provider trading connector library](../../README.md); strategies remain in their owning project.
 
-This is one provider module in the wider [Trading Connectors](../../README.md) library, not the repository's overarching architecture.
+The connector includes:
 
-## Purpose
+- Production-only read-only REST with explicit account binding or opt-in unique account discovery.
+- Funded and active-challenge account lookup; ambiguous results fail closed.
+- Propr account equity/margin parsing, native inventory, Decimal values and reversible HIP-3 symbol mapping.
+- Durable local intent journal, unknown-outcome handling, fake-only order lifecycle and kill drills.
+- Authenticated account WebSocket ingestion and conservative double-REST reconciliation.
+- Credential-free shadow gateway and optional `ml4t-live==0.1.2` `AsyncBrokerProtocol` integration.
+- An adapter for running the unchanged ML4T backtest `Strategy` through `LiveEngine`; target-weight calls become audited shadow intents.
+- Independent Binance spot completed-kline reference feed; not equivalent to Propr/Hyperliquid execution prices.
 
-Implement a safe, reproducible gateway to the Propr trading API, including REST commands, account/order/position snapshots and WebSocket events. Offer an **optional** bridge to `ml4t-live`'s installed `AsyncBrokerProtocol` and keep a distinct `DataFeedProtocol` adapter for live market data.
+No operational code enables remote order, cancel, replace, leverage, close or flatten mutations.
 
-See [implementation plan](PLAN.md) for scope, API evidence, unresolved details, acceptance gates and delivery sequence.
+## Tests and use
 
-## Documented endpoints (not execution-safety certification)
+From the repository root:
 
-| Environment | REST | WebSocket |
-| --- | --- | --- |
-| Production | `https://api.propr.xyz/v1` | `wss://api.propr.xyz/ws` |
-| Beta | `https://api.beta.propr.xyz/v1` | `wss://api.beta.propr.xyz/ws` |
+```bash
+/home/quant/dev/quant/quant-research/.venv/bin/python -m pytest -q connectors/propr/tests
+/home/quant/dev/quant/quant-research/.venv/bin/python -m connectors.propr.examples.shadow_demo
+```
 
-Beta examples show a `pk_beta_` key and the developer page recommends switching environments to test bots. **This does not establish that Beta is guaranteed paper-only or free of monetary consequences.** Confirm account semantics before placing even a test order.
+For a read-only account check, provision `PROPR_LIVE_API_KEY` privately and select identity explicitly:
 
-## Official sources
+```bash
+python -m connectors.propr.examples.inspect_account --account-id YOUR_ACCOUNT_ID
+python -m connectors.propr.examples.inspect_account --discover-unique
+```
 
-- [Python SDK developer documentation](https://www.propr.xyz/developers/python-sdk)
-- [Main API developer docs](https://www.propr.xyz/developers)
-- [API reference](https://github.com/XBorgLabs/propr-docs/blob/main/docs/api.md)
-- [WebSocket reference](https://github.com/XBorgLabs/propr-docs/blob/main/docs/websocket.md)
-- [Python SDK source](https://github.com/XBorgLabs/propr-docs/blob/main/python/propr_sdk.py)
-- [Python examples](https://github.com/XBorgLabs/propr-docs/tree/main/python/examples)
+The second command proceeds only if the API yields exactly one funded or active challenge account. Output is redacted and no orders are submitted.
+
+See [OPERATOR_RUNBOOK.md](OPERATOR_RUNBOOK.md), [COMPATIBILITY.md](COMPATIBILITY.md) and [RELEASE_REPORT.md](RELEASE_REPORT.md). Merging this code does not authorize trading.

@@ -1,0 +1,26 @@
+name: Connector safety tests
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  propr:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install baseline (without secrets or ML4T)
+        run: python -m pip install -e ".[test]"
+      - name: Credential-free safety and fault tests
+        env:
+          PROPR_LIVE_API_KEY: ""
+        run: python -m pytest -q connectors/propr/tests
+      - name: Static checks
+        run: python -m ruff check connectors/propr
