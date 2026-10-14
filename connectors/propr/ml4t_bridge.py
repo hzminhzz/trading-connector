@@ -250,13 +250,11 @@ class ML4TShadowBroker:
         )
         position_id = None
         if reduce_only:
-            native_positions = [
-                item for item in self._inventory.positions
-                if item.asset == asset and item.quantity > 0
-            ]
-            if len(native_positions) != 1:
+            native_asset = self.registry.to_native(asset)
+            native_position = one_way_positions(self._inventory.positions).get(native_asset)
+            if native_position is None:
                 raise ValueError("Reduce-only intent requires one exact native position")
-            position_id = native_positions[0].id
+            position_id = native_position.id
         request = OrderRequest(
             account_id=self._account.account_id, asset=asset,
             side=actual_side.value, position_side=position_side,

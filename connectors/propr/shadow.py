@@ -40,6 +40,7 @@ class ShadowGateway:
                 intent = self.journal.stage(
                     request.account_id, request.asset, request.side,
                     request.position_side, request.quantity, request.reduce_only,
+                    request.position_id,
                 )
                 identifier = intent.id
                 # No remote I/O occurs between stage and reconciliation.

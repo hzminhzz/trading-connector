@@ -1,7 +1,7 @@
 """Fake-only cancellation, non-atomic replacement and precise reductions."""
 from dataclasses import dataclass
 from decimal import Decimal
-from .execution import FakeVenue, FakeExecutionGateway, OrderRequest
+from .execution import FakeOrderResult, FakeVenue, FakeExecutionGateway, OrderRequest
 from .state import UnknownOutcome
 
 FINAL = frozenset(("cancelled", "filled", "rejected", "expired"))
@@ -27,11 +27,16 @@ class FakeLifecycleVenue(FakeVenue):
             raise TimeoutError("Cancel result ambiguous")
         if self.cancel_outcome == "400":
             raise ValueError("Cancel rejected")
-        if intent_id not in self.orders:
-            raise KeyError(intent_id)
-        if self.orders[intent_id] not in FINAL:
-            self.orders[intent_id] = self.cancel_outcome
-        return self.orders[intent_id]
+        current = self.orders[intent_id]
+        state = current.status if isinstance(current, FakeOrderResult) else current
+        if state not in FINAL:
+            filled = (
+                current.cumulative_quantity if isinstance(current, FakeOrderResult)
+                else self.filled_quantities.get(intent_id, Decimal(0))
+            )
+            self.orders[intent_id] = FakeOrderResult(self.cancel_outcome, filled)
+        result = self.orders[intent_id]
+        return result.status if isinstance(result, FakeOrderResult) else result
 
 class FakeLifecycleGateway(FakeExecutionGateway):
     def __init__(self, journal, venue, registry):
@@ -46,6 +51,7 @@ class FakeLifecycleGateway(FakeExecutionGateway):
         except (TimeoutError, ValueError, KeyError):
             pass
         state = await self.venue.status(intent_id)
+        state = state.status if isinstance(state, FakeOrderResult) else state
         if state not in FINAL:
             self.journal.mark(intent_id, "unknown")
             raise UnknownOutcome("Cancel not verified final; opening halted")

@@ -94,3 +94,11 @@ def test_unknown_intent_blocks_ws_ready(tmp_path):
         asyncio.run(ws.run_once(max_events=0))
     assert not reconciler.ready
     journal.close()
+
+
+def test_ws_rejects_foreign_tls_endpoint_before_connecting():
+    with pytest.raises(ValueError, match="Propr production WebSocket"):
+        AccountWebSocket(
+            ws_url="wss://attacker.example/ws", api_key="secret",
+            reconciler=None, connector=lambda *_args, **_kwargs: pytest.fail("connected"),
+        )

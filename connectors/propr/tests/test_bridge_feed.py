@@ -207,3 +207,37 @@ def test_live_engine_adapts_target_weight_strategy_to_shadow_intents():
     assert len(shadow.decisions) == 1
     assert shadow.decisions[0].allowed
     assert shadow.decisions[0].quantity == "1.0"
+
+
+def test_reduce_only_maps_canonical_symbol_to_exact_native_position():
+    registry = InstrumentRegistry([
+        Instrument("AAPL", "xyz:AAPL", D(".01"), D(".01"), D(".01")),
+    ])
+    created = datetime.now(UTC).isoformat()
+    native = NativePosition(
+        "native-aapl-1", "xyz:AAPL", "long", D("1"),
+        entry_price=D("100"), created_at=created,
+    )
+    ready = Ready()
+    shadow = ShadowGateway(registry, ready)
+    broker = ML4TShadowBroker(FakeAccount(), FakeInventory([native]), shadow, registry, ready)
+    requests = []
+    submit = shadow.submit
+
+    async def capture(request):
+        requests.append(request)
+        return await submit(request)
+
+    shadow.submit = capture
+
+    async def run():
+        await broker.connect()
+        await broker.submit_order_async("AAPL", -0.25)
+
+    asyncio.run(run())
+    assert len(requests) == 1
+    assert requests[0].asset == "AAPL"
+    assert requests[0].side == "sell"
+    assert requests[0].position_side == "long"
+    assert requests[0].reduce_only
+    assert requests[0].position_id == "native-aapl-1"

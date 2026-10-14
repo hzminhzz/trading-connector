@@ -13,7 +13,8 @@ class Mode(str, Enum):
     EXECUTION = "execution"
 
 
-_ENDPOINTS = ("https://api.propr.xyz/v1", "wss://api.propr.xyz/ws")
+PRODUCTION_WS_URL = "wss://api.propr.xyz/ws"
+_ENDPOINTS = ("https://api.propr.xyz/v1", PRODUCTION_WS_URL)
 
 
 @dataclass(frozen=True)

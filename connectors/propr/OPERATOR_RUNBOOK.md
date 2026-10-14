@@ -38,6 +38,15 @@
 5. Reset requires explicit manual approval and reconciled state; never reset automatically after reconnect.
 6. For key rotation, revoke and rotate via Propr Settings/secret storage, restart the read-only process and rebind the account.
 
+## Operational readiness
+
+These controls are **not provisioned** for this read-only/shadow candidate:
+
+- **Risk thresholds:** no numeric limits are approved while the challenge rules and account consequences remain unverified. Before any execution review, record account-specific maximum notional, leverage, daily loss and drawdown limits from authoritative rules, plus the approved local caps.
+- **Alarms:** no delivery channel is configured. Any future deployment must test alerts for stale/disconnected WebSocket, unknown order outcome, failed reconciliation, risk halt and daily-loss/reset events.
+- **Kill switch:** current drills are synthetic. No live cancel/reduce/flatten control exists in this connector.
+- **Cancel/flatten:** if an incident occurs with real positions, stop submissions, use the provider UI for the explicitly selected account, then verify orders, positions and fills through read-only reconciliation. Do not claim flattening until the provider state confirms it.
+
 ## Execution gate
 
 Challenge-account paper semantics and real-money/evaluation consequences are not independently established. Do not submit orders or change leverage. Live execution additionally requires verified account rules, tested limits/recovery, a four-week paper record, explicit scoped authorization and a separate release decision.

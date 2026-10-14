@@ -54,7 +54,7 @@ def test_reduce_native_position_side(tmp_path):
     venue.positions["short-1"] = NativePosition("short-1", "a", "BTC", "short", D("2"))
     async def run():
         intent, status = await gateway.reduce("short-1", D("1"))
-        assert status == "accepted"
+        assert status == "open"
         assert intent.side == "buy" and intent.position_side == "short" and intent.reduce_only
         assert intent.position_id == "short-1"
         with pytest.raises(ValueError):

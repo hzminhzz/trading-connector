@@ -65,7 +65,10 @@ class IntentJournal:
         return intent
 
     def mark(self, intent_id, state):
-        if state not in ("staged", "unknown", "accepted", "rejected", "reconciled"):
+        if state not in (
+            "staged", "unknown", "accepted", "pending", "open", "partial",
+            "filled", "rejected", "expired", "reconciled",
+        ):
             raise ValueError("Invalid journal state")
         with self.connection:
             cur = self.connection.execute("UPDATE intents SET state=? WHERE id=?", (state, intent_id))
@@ -83,6 +86,14 @@ class IntentJournal:
             "SELECT id,payload,state FROM intents WHERE state IN ('staged','unknown') ORDER BY rowid"
         ).fetchall()
         return [(identifier, Intent(**json.loads(payload)), state) for identifier, payload, state in rows]
+
+    def get(self, intent_id):
+        row = self.connection.execute(
+            "SELECT payload FROM intents WHERE id=?", (intent_id,)
+        ).fetchone()
+        if row is None:
+            raise KeyError(intent_id)
+        return Intent(**json.loads(row[0]))
 
     def recover(self):
         with self.connection:

@@ -8,6 +8,7 @@ import hashlib
 import json
 from dataclasses import dataclass
 
+from .config import PRODUCTION_WS_URL
 from .reconcile import AccountReconciler
 from .state import UnknownOutcome
 
@@ -23,8 +24,8 @@ class WSHealth:
 class AccountWebSocket:
     def __init__(self, *, ws_url, api_key, reconciler: AccountReconciler,
                  connector=None, handshake_timeout=10.0, idle_timeout=65.0):
-        if not ws_url.startswith("wss://") or not api_key:
-            raise ValueError("Authenticated TLS WebSocket required")
+        if ws_url != PRODUCTION_WS_URL or not api_key:
+            raise ValueError("Authenticated Propr production WebSocket required")
         if handshake_timeout <= 0 or idle_timeout <= 0:
             raise ValueError("WebSocket timeout must be positive")
         if connector is None:
