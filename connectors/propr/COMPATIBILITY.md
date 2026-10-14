@@ -27,7 +27,7 @@
 
 ## Unresolved release qualification
 
-1. The selected account and authenticated read-only schemas can be verified, but public provider wording does not establish that challenge orders are simulated-only or free of financial/evaluation consequences.
-2. The account is not considered paper-safe without an authoritative account-class and order-routing guarantee. `assert_paper_trading()` and all remote mutations remain blocked.
-3. WebSocket sequencing, restart replay, verified tick/lot metadata, provider-specific challenge rules, and quote-to-execution parity remain unqualified.
-4. No four-week paper record or live-trading authorization exists. **Production execution remains NO-GO.**
+1. Propr's homepage FAQ now says trader orders run on simulated accounts and are submitted as signals; Propr may copy signals to a live venue. It says the one-time challenge fee is the trader's maximum loss. [Homepage FAQ](https://www.propr.xyz/)
+2. The [Python SDK page](https://www.propr.xyz/developers/python-sdk) labels production as actual trading with real funds and exposes order/margin mutation methods. It does not clarify whether this account's API `POST /accounts/{id}/orders` is only a simulated signal or a live order. Provider confirmation for that exact API path/account is still required.
+3. Challenge fees and account evaluation/failure are real consequences even when trader-facing orders are simulated. Do not call this account risk-free. `assert_paper_trading()` and all remote mutations remain blocked pending API-path clarification and scoped approval.
+4. WebSocket sequencing, restart replay, verified tick/lot metadata, provider-specific challenge rules, and quote-to-execution parity remain unqualified. No four-week paper record or live-trading authorization exists. **Production execution remains NO-GO.**
