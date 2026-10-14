@@ -122,3 +122,50 @@ def test_retry_after_restart_reuses_durable_id(tmp_path):
 
     asyncio.run(retry())
     journal.close()
+
+
+def test_split_batch_outcomes_are_recorded_per_intent(tmp_path):
+    journal, venue, gateway = setup(tmp_path)
+    venue.batch_outcomes = [
+        FakeOrderResult("partial", D(".01")),
+        FakeOrderResult("rejected", D("0")),
+    ]
+    requests = [
+        OrderRequest("a", "BTC", "buy", "long", D(".02")),
+        OrderRequest("a", "BTC", "sell", "short", D(".02")),
+    ]
+
+    async def run():
+        outcomes = await gateway.submit_batch(requests)
+        assert [status for _, status in outcomes] == ["partial", "rejected"]
+        assert len({intent.id for intent, _ in outcomes}) == 2
+        assert [state for _, _, state in journal.unresolved()] == []
+        assert venue.calls == [("submit_batch", tuple(i.id for i, _ in outcomes))]
+
+    asyncio.run(run())
+    journal.close()
+
+
+def test_unknown_split_batch_member_blocks_openings(tmp_path):
+    journal, venue, gateway = setup(tmp_path)
+    venue.batch_outcomes = [
+        FakeOrderResult("open", D("0")),
+        FakeOrderResult("unknown", D("0")),
+    ]
+    requests = [
+        OrderRequest("a", "BTC", "buy", "long", D(".02")),
+        OrderRequest("a", "BTC", "sell", "short", D(".02")),
+    ]
+
+    async def run():
+        with pytest.raises(UnknownOutcome, match="Batch contains unknown"):
+            await gateway.submit_batch(requests)
+        states = journal.connection.execute(
+            "SELECT state FROM intents ORDER BY rowid"
+        ).fetchall()
+        assert states == [("open",), ("unknown",)]
+        with pytest.raises(UnknownOutcome):
+            await gateway.submit(requests[0])
+
+    asyncio.run(run())
+    journal.close()

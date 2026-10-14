@@ -64,6 +64,27 @@ class IntentJournal:
             )
         return intent
 
+    def stage_batch(self, intents):
+        intents = tuple(intents)
+        if not intents:
+            return ()
+        if self.has_unknown():
+            raise UnknownOutcome("Unreconciled intent: opening halted")
+        if len({intent.id for intent in intents}) != len(intents):
+            raise ValueError("Duplicate batch intent ID")
+        for intent in intents:
+            if (not intent.account_id or not intent.asset
+                    or intent.side not in ("buy", "sell")
+                    or intent.position_side not in ("long", "short")
+                    or (intent.reduce_only and not intent.position_id)):
+                raise ValueError("Invalid durable order intent identity")
+        with self.connection:
+            self.connection.executemany(
+                "INSERT INTO intents VALUES (?, ?, 'staged')",
+                ((intent.id, json.dumps(intent.__dict__)) for intent in intents),
+            )
+        return intents
+
     def mark(self, intent_id, state):
         if state not in (
             "staged", "unknown", "accepted", "pending", "open", "partial",

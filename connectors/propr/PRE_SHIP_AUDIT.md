@@ -7,14 +7,14 @@ Milestone: [Propr Connector](https://github.com/hzminhzz/trading-connector/miles
 
 ## Verified evidence
 
-- `/home/quant/dev/quant/quant-research/.venv/bin/python -m pytest -q connectors/propr/tests`: **104 passed**.
+- `/home/quant/dev/quant/quant-research/.venv/bin/python -m pytest -q connectors/propr/tests`: **106 passed**.
 - `uv run --no-sync ruff check connectors/propr`: **all checks passed**.
-- Baseline connector suite without ML4T: **81 passed, 16 skipped**.
+- Baseline connector suite without ML4T: **83 passed, 16 skipped**.
 - `uv build --offline`: built source distribution and wheel.
 - `connectors.propr.examples.shadow_demo`: valid synthetic intent accepted; below-minimum quantity rejected.
 - Authenticated production read-only smoke: health/core `OK`, unique active challenge account bound, financial fields complete, orders **0**, positions **0**, trades **0**. No account ID, balance or credential was printed or committed.
 - Actual `CryptoTSMOMRegimeStrategy` from `dev/quant/quant-research` ran through ML4T 0.1.2 `LiveEngine` using `ML4TStrategyAdapter`; one synthetic target intent was accepted by the shadow gateway. The finite smoke feed ended in `feed_terminated` degraded state. No remote order endpoint was invoked.
-- Review findings fixed: WebSocket credentials now require the exact Propr production endpoint; canonical reductions resolve exact native position IDs; shadow journal retains that ID; fake execution exercises all specified outcomes and same-ID retry after restart.
+- Review findings fixed: WebSocket credentials require the exact Propr production endpoint; canonical reductions resolve exact native position IDs; shadow journals retain those IDs; fake lifecycle tests cover per-order batch outcomes, cumulative fills and same-ID restart retries.
 - Public provider wording does not establish that this challenge account is simulated-only or free of monetary/evaluation consequences. The paper assertion and every remote mutation remain blocked.
 - GitHub-hosted checks must be rechecked after the final push.
 

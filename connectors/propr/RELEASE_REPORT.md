@@ -6,14 +6,14 @@ Date: 2026-10-14. Repository: `hzminhzz/trading-connector`, milestone Propr Conn
 
 ## Verified evidence
 
-- Installed-ML4T connector suite: **104 passed**.
+- Installed-ML4T connector suite: **106 passed**.
 - `uv run --no-sync ruff check connectors/propr`: **all checks passed**.
-- Baseline connector suite without ML4T: **81 passed, 16 skipped**.
+- Baseline connector suite without ML4T: **83 passed, 16 skipped**.
 - `uv build --offline`: built source distribution and wheel.
 - Shadow demo: accepted a valid intent and rejected below-minimum quantity; no network client used.
 - Authenticated production read-only check: health and core service `OK`; unique active challenge account bound; all required financial fields present; orders **0**, positions **0**, trades **0**. Account identifiers, balances and credentials were not printed or recorded.
 - Actual `CryptoTSMOMRegimeStrategy` from `dev/quant/quant-research` ran through the installed `ml4t-live==0.1.2` `LiveEngine` using `ML4TStrategyAdapter`; one synthetic one-bar target intent was accepted by the shadow gateway. The finite feed ended with the expected `feed_terminated` degraded state; no remote order endpoint was invoked.
-- Credential-free fixtures cover paginated account/inventory discovery, credential-safe WebSocket endpoint binding, mapped native-position reductions, durable shadow position identity, fake lifecycle outcomes and cumulative fills, reconciliation faults and shadow decisions.
+- Credential-free fixtures cover paginated account/inventory discovery, credential-safe WebSocket endpoint binding, mapped native-position reductions, durable shadow position identity, fake single/batch lifecycle outcomes, cumulative fills, same-ID restart retries, reconciliation faults and shadow decisions.
 
 ## Qualification gates
 

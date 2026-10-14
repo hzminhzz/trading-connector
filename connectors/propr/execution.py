@@ -2,7 +2,7 @@
 from dataclasses import dataclass
 from decimal import Decimal
 
-from .state import IntentJournal, UnknownOutcome
+from .state import Intent, IntentJournal, UnknownOutcome, new_ulid
 
 @dataclass(frozen=True)
 class OrderRequest:
@@ -40,6 +40,7 @@ class FakeVenue:
     def __init__(self):
         self.orders = {}
         self.outcome = FakeOrderResult("open", Decimal(0))
+        self.batch_outcomes = None
         self.calls = []
 
     async def submit(self, intent, request):
@@ -56,8 +57,33 @@ class FakeVenue:
         self.orders[intent.id] = result
         return result
 
+    async def submit_batch(self, intent_requests):
+        items = tuple(intent_requests)
+        self.calls.append(("submit_batch", tuple(intent.id for intent, _ in items)))
+        outcomes = self.batch_outcomes or (self.outcome,) * len(items)
+        if len(outcomes) != len(items):
+            raise ValueError("Fake batch outcome count mismatch")
+        results = []
+        for (intent, request), outcome in zip(items, outcomes):
+            if intent.id in self.orders:
+                results.append(self.orders[intent.id])
+                continue
+            if outcome == "timeout":
+                raise TimeoutError("Ambiguous fake batch response")
+            result = _fake_result(outcome, request.quantity)
+            self.orders[intent.id] = result
+            results.append(result)
+        return results
+
     async def status(self, intent_id):
         return self.orders.get(intent_id)
+
+
+def _fake_result(outcome, quantity):
+    if isinstance(outcome, FakeOrderResult):
+        return outcome
+    filled = quantity if outcome == "filled" else Decimal(0)
+    return FakeOrderResult(outcome, filled)
 
 
 _KNOWN_OUTCOMES = {"pending", "open", "partial", "filled", "rejected", "expired", "cancelled"}
@@ -95,6 +121,45 @@ class FakeExecutionGateway:
                                     request.position_side, request.quantity, request.reduce_only,
                                     request.position_id)
         return await self._send(intent, request)
+
+    async def submit_batch(self, requests):
+        requests = tuple(requests)
+        if not requests:
+            return []
+        for request in requests:
+            request.validate(self.registry.by_canonical[request.asset])
+        intents = tuple(
+            Intent(
+                new_ulid(), request.account_id, request.asset, request.side,
+                request.position_side, str(request.quantity), request.reduce_only,
+                request.position_id,
+            )
+            for request in requests
+        )
+        self.journal.stage_batch(intents)
+        try:
+            results = await self.venue.submit_batch(zip(intents, requests))
+        except (TimeoutError, ConnectionError):
+            for intent in intents:
+                self.journal.mark(intent.id, "unknown")
+            raise UnknownOutcome("Batch submission outcome unknown; reconcile each intent")
+        if not isinstance(results, list) or len(results) != len(intents):
+            for intent in intents:
+                self.journal.mark(intent.id, "unknown")
+            raise UnknownOutcome("Incomplete batch response; reconcile each intent")
+        outcomes = []
+        unknown = False
+        for intent, request, result in zip(intents, requests, results):
+            if _validate_result(result, request.quantity):
+                self.journal.mark(intent.id, result.status)
+                outcomes.append((intent, result.status))
+            else:
+                self.journal.mark(intent.id, "unknown")
+                outcomes.append((intent, "unknown"))
+                unknown = True
+        if unknown:
+            raise UnknownOutcome("Batch contains unknown outcomes; reconcile each intent")
+        return outcomes
 
     async def retry(self, intent_id, request: OrderRequest):
         request.validate(self.registry.by_canonical[request.asset])
