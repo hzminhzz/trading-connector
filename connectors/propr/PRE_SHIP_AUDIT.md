@@ -7,36 +7,35 @@ Milestone: [Propr Connector](https://github.com/hzminhzz/trading-connector/miles
 
 ## Verified evidence
 
-- Local working tree was clean at the start of this audit; branch head was `6a99d95236ab776ed918be0b53d056baf1c82c53`.
-- `python -m pytest -q connectors/propr/tests`: **69 passed, 16 skipped** with the baseline Python environment on the VPS.
-- `uv run --no-sync ruff check .`: **all checks passed**.
-- GitHub reported three successful checks for the branch head: two connector test jobs and GitGuardian.
-- The existing PR report records an additional ML4T-enabled run with 89 passing tests; that ML4T run was **not independently repeated** in this verification.
-- `uv run --no-sync pytest -q` did not work in a newly created uninstalled virtualenv (imports failed); `uv run --no-sync python -m pytest -q` failed because pytest was not installed in that environment. The repository's CI explicitly uses `python -m pip install -e ".[test]"` then `python -m pytest`. Do not interpret the uninstalled environment as an underlying connector regression.
+- `/home/quant/dev/quant/quant-research/.venv/bin/python -m pytest -q connectors/propr/tests`: **93 passed**.
+- `uv run --no-sync ruff check connectors/propr`: **all checks passed**.
+- Baseline connector suite without ML4T: **71 passed, 16 skipped**.
+- `uv build --offline`: built source distribution and wheel.
+- `connectors.propr.examples.shadow_demo`: valid synthetic intent accepted; below-minimum quantity rejected.
+- Authenticated production read-only smoke: health/core `OK`, unique active challenge account bound, financial fields complete, orders **0**, positions **0**, trades **0**. No account ID, balance or credential was printed or committed.
+- Actual `CryptoTSMOMRegimeStrategy` from `dev/quant/quant-research` ran through ML4T 0.1.2 `LiveEngine` using `ML4TStrategyAdapter`; one synthetic target intent was accepted by the shadow gateway. The finite smoke feed ended in `feed_terminated` degraded state. No remote order endpoint was invoked.
+- Public provider wording does not establish that this challenge account is simulated-only or free of monetary/evaluation consequences. The paper assertion and every remote mutation remain blocked.
+- GitHub-hosted checks must be rechecked after the final push.
 
-## Readiness
+## Issue disposition
 
-| Gate | Verified state |
+| Issues | Evidence / disposition |
 | --- | --- |
-| #1 Contract and identity baseline | Source/fixture-level implementation exists; no authenticated provider schema verification |
-| #2 Beta environment | Not documented as definitely simulated; implementation remains safely fail-closed |
-| #3-#4 Read-only Beta account/inventory | Mock tests only; authenticated account evidence missing |
-| #5-#7 Remote order lifecycle and WebSocket | Local simulation/fixtures only |
-| #8-#9 Shadow and ML4T | Local integration reported; no sustained authenticated live-data operation |
-| #10 Remote Beta order tests | BLOCKED by authoritative simulation proof, selected account, and scoped test approval |
-| #11 Live prop-rule and emergency controls | Synthetic drills, not live-qualified |
-| #12 Four-week paper/live release gate | NOT MET |
+| #1 | Pinned Propr REST/WS contracts and inspected installed ML4T interface; account identity is explicit or uniquely discovered |
+| #2 | Account source is identified as an active challenge; paper safety remains **UNVERIFIED**, and mutation APIs are unavailable |
+| #3–#4 | Authenticated read-only account and inventory checks passed; zero current orders, positions and trades |
+| #5–#7 | Idempotency, race, reconciliation, WebSocket fault and restart behavior remain synthetic-test-only |
+| #8–#9 | Shadow gateway and unchanged project strategy run through ML4T `LiveEngine`; no remote order mutation |
+| #10 | Safety proof is unresolved; execution refuses, with mock/shadow qualification retained |
+| #11 | Risk and kill-switch tests are synthetic; no live controls are claimed |
+| #12 | Four-week paper evidence is **NOT MET**; report remains **NO-GO for execution** |
 
 ## Ship decision
 
-**NO-GO.** Preserve PR #13 as draft and leave milestone open. Do not add `Closes` footers to tickets whose acceptance criteria depend on unavailable provider evidence. Do not submit Beta/production orders or change leverage to force qualification.
+Merge only as a read-only/synthetic-shadow connector candidate after final CI checks pass. This is not approval to place orders, change leverage or deploy a live trading process. Close issues only with their stated blocked/NO-GO dispositions where external safety or duration evidence is unavailable.
 
-## Next actions
+## External execution blockers
 
-1. Establish the Beta account ID through authenticated read-only discovery without leaking credentials; preserve all account data privately.
-2. Obtain a clear authoritative statement of Beta account simulation and financial consequences.
-3. Perform account and WebSocket read-only checks, then verify market/feed continuity and sustained shadow sessions.
-4. Request new, *scoped* order-test permission only after Beta simulation is proven.
-5. Accumulate the paper duration required by the plan; then rerun all issue criteria and ship gates.
-
-This file records what was measured, not a claim that the release is complete.
+1. Obtain authoritative Propr account-class, order-routing, fee and evaluation/funded-balance consequences for this challenge.
+2. Accumulate and verify the required four-week paper record.
+3. Complete provider-specific rules, event-replay, market-price parity and live recovery qualification before any separate execution approval.

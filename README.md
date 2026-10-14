@@ -33,4 +33,4 @@ uv build --offline
 
 ## Development status
 
-Propr has a packaged read-only REST gateway, conservative WebSocket reconciliation, synthetic order/kill-switch drills, shadow decisions and an optional ML4T LiveEngine integration. **No remote order calls are implemented or authorized.** The production decision remains **NO-GO** until Beta safety evidence, authenticated account verification, four weeks of paper trading and a separate explicit approval exist. See the [qualification report](connectors/propr/RELEASE_REPORT.md).
+Propr has a production-only read-only REST gateway, conservative WebSocket reconciliation, synthetic order/kill-switch drills, shadow decisions and an optional ML4T LiveEngine integration. **No remote order calls are implemented or authorized.** The release remains **NO-GO for execution** until account-class safety, four weeks of paper evidence and separate approval are established. See the [qualification report](connectors/propr/RELEASE_REPORT.md).

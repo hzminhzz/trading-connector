@@ -22,9 +22,13 @@ def test_read_only_account_binding_and_no_mutations():
     calls = []
     def handler(request):
         calls.append((request.method, request.url.path))
-        assert request.headers["X-API-Key"] == "pk_beta_dummy"
+        assert request.headers["X-API-Key"] == "pk_live_dummy"
         if request.url.path.endswith("/health"):
             return httpx.Response(200, json={"status": "OK"})
+        if request.url.path.endswith("/health/services"):
+            return httpx.Response(200, json={"core": "OK"})
+        if request.url.path.endswith("/book-account-issuances"):
+            return httpx.Response(200, json={"data": []})
         if request.url.path.endswith("/challenge-attempts"):
             return httpx.Response(200, json={"data": [
                 {"accountId": "selected", "attemptId": "a1", "totalPnl": "100"}]})
@@ -33,12 +37,13 @@ def test_read_only_account_binding_and_no_mutations():
         raise AssertionError("Unexpected endpoint")
     async def run():
         reader = ReadOnlyAccount(
-            ProprConfig("beta", account_id="selected", api_key="pk_beta_dummy"),
+            ProprConfig("production", account_id="selected", api_key="pk_live_dummy"),
             httpx.MockTransport(handler),
         )
         try:
             result = await reader.inspect()
             assert result["account_bound"]
+            assert result["account_source"] == "challenge"
             assert result["financial_fields_verified"]
             assert result["snapshot"].equity == Decimal("1080")
             assert result["snapshot"].margin_used == Decimal("370")
@@ -47,21 +52,57 @@ def test_read_only_account_binding_and_no_mutations():
             await reader.close()
     asyncio.run(run())
     assert all(method == "GET" for method, _ in calls)
-    assert len(calls) == 3
+    assert len(calls) == 5
 
 
-def test_account_not_auto_selected():
+def test_unique_funded_account_can_be_discovered():
     def handler(request):
         if request.url.path.endswith("/health"):
             return httpx.Response(200, json={"status": "OK"})
-        return httpx.Response(200, json={"data": [{"accountId": "other"}]})
+        if request.url.path.endswith("/health/services"):
+            return httpx.Response(200, json={"core": "OK"})
+        if request.url.path.endswith("/book-account-issuances"):
+            return httpx.Response(200, json={"data": [{"accountId": "funded"}]})
+        if request.url.path.endswith("/challenge-attempts"):
+            return httpx.Response(200, json={"data": []})
+        if request.url.path.endswith("/accounts/funded"):
+            return httpx.Response(200, json=_account_payload("funded"))
+        raise AssertionError("Unexpected endpoint")
+
     async def run():
         reader = ReadOnlyAccount(
-            ProprConfig("beta", account_id="selected", api_key="pk_beta_dummy"),
+            ProprConfig("production", api_key="pk_live_dummy"),
             httpx.MockTransport(handler),
         )
         try:
-            with pytest.raises(RemoteAPIError, match="not uniquely"):
+            result = await reader.inspect()
+            assert result["snapshot"].account_id == "funded"
+            assert result["snapshot"].attempt_id is None
+            assert result["account_source"] == "funded"
+        finally:
+            await reader.close()
+    asyncio.run(run())
+
+
+def test_account_not_auto_selected_when_discovery_is_ambiguous():
+    def handler(request):
+        if request.url.path.endswith("/health"):
+            return httpx.Response(200, json={"status": "OK"})
+        if request.url.path.endswith("/health/services"):
+            return httpx.Response(200, json={"core": "OK"})
+        if request.url.path.endswith("/book-account-issuances"):
+            return httpx.Response(200, json={"data": [{"accountId": "funded"}]})
+        if request.url.path.endswith("/challenge-attempts"):
+            return httpx.Response(200, json={"data": [{"accountId": "challenge"}]})
+        raise AssertionError("No account may be selected")
+
+    async def run():
+        reader = ReadOnlyAccount(
+            ProprConfig("production", api_key="pk_live_dummy"),
+            httpx.MockTransport(handler),
+        )
+        try:
+            with pytest.raises(RemoteAPIError, match="absent or ambiguous"):
                 await reader.inspect()
         finally:
             await reader.close()

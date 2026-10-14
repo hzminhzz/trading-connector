@@ -1,32 +1,36 @@
-# Propr connector (read-only and synthetic shadow candidate)
+# Propr connector (read-only and synthetic-shadow candidate)
 
-**Current classification: NO-GO for any remote order execution.** This module is one provider in the [multi-provider trading connector library](../../README.md); it does not contain strategies.
+**Remote order execution: NO-GO.** This is one provider in the [multi-provider trading connector library](../../README.md); strategies remain in their owning project.
 
 The connector includes:
 
-- Async HTTPS read-only REST with explicit Beta/production credentials, account binding and pagination.
-- Propr account equity/margin parsing, native order/position/trade data, Decimal and reversible HIP-3 symbol mapping.
-- Durable local intent journal, fail-closed unknown outcomes, fake-only cancel/replace/reduce and kill drills.
-- Authenticated account WebSocket client and conservative double REST reconciliation, heartbeat/reconnect detection.
-- Credential-free shadow intent gateway and optional native `ml4t-live==0.1.2` `AsyncBrokerProtocol` bridge.
-- Optional independent Binance spot completed-kline reference feed using ML4T `MarketEvent` (not equivalent to Propr/Hyperliquid execution prices).
-- Explicit blocked Beta remote order qualification. No operational code enables real POST/PUT order mutations.
+- Production-only read-only REST with explicit account binding or opt-in unique account discovery.
+- Funded and active-challenge account lookup; ambiguous results fail closed.
+- Propr account equity/margin parsing, native inventory, Decimal values and reversible HIP-3 symbol mapping.
+- Durable local intent journal, unknown-outcome handling, fake-only order lifecycle and kill drills.
+- Authenticated account WebSocket ingestion and conservative double-REST reconciliation.
+- Credential-free shadow gateway and optional `ml4t-live==0.1.2` `AsyncBrokerProtocol` integration.
+- An adapter for running the unchanged ML4T backtest `Strategy` through `LiveEngine`; target-weight calls become audited shadow intents.
+- Independent Binance spot completed-kline reference feed; not equivalent to Propr/Hyperliquid execution prices.
+
+No operational code enables remote order, cancel, replace, leverage, close or flatten mutations.
 
 ## Tests and use
 
-From the repo root run:
+From the repository root:
 
 ```bash
 /home/quant/dev/quant/quant-research/.venv/bin/python -m pytest -q connectors/propr/tests
 /home/quant/dev/quant/quant-research/.venv/bin/python -m connectors.propr.examples.shadow_demo
 ```
 
-For a read-only Beta account check, provision the secret key privately as `PROPR_BETA_API_KEY` and provide the explicit account ID:
+For a read-only account check, provision `PROPR_LIVE_API_KEY` privately and select identity explicitly:
 
 ```bash
-python -m connectors.propr.examples.beta_readonly_smoke --account-id YOUR_ACCOUNT_ID
+python -m connectors.propr.examples.inspect_account --account-id YOUR_ACCOUNT_ID
+python -m connectors.propr.examples.inspect_account --discover-unique
 ```
 
-This command does not submit orders and only prints redacted status/counts.
+The second command proceeds only if the API yields exactly one funded or active challenge account. Output is redacted and no orders are submitted.
 
-Read [OPERATOR_RUNBOOK.md](OPERATOR_RUNBOOK.md), [COMPATIBILITY.md](COMPATIBILITY.md), [BETA_SAFETY.md](BETA_SAFETY.md) and [RELEASE_REPORT.md](RELEASE_REPORT.md). Publishing an issue or merging a PR does not authorize trading.
+See [OPERATOR_RUNBOOK.md](OPERATOR_RUNBOOK.md), [COMPATIBILITY.md](COMPATIBILITY.md) and [RELEASE_REPORT.md](RELEASE_REPORT.md). Merging this code does not authorize trading.

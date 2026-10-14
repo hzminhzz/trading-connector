@@ -1,15 +1,15 @@
-# Propr implementation status — 2026-10-13
+# Propr implementation status — 2026-10-14
 
-**Source state:** active milestone branch `feat/propr-connector`, draft PR #13.
+**Source state:** `feat/propr-connector`, draft PR #13.
 
 | Area | Working implementation | Missing qualification |
 | --- | --- | --- |
-| Identity and transport | Explicit environment, account binding, read-only HTTPS | Authenticated Beta account inspection and response conformity |
-| Native inventory | Documented `orderId/positionId/tradeId` fields, full pages, Decimal and one-way guard | Live account, pagination shift evidence |
-| Order state | SQLite WAL with ULID intent, unknown-on-crash; fake-only lifecycle | Real transport deliberately unavailable, more partial-fill/replay evidence |
-| WS state | Read-only WSS, authenticated handshake, bounded recovery; reconciler requires stable double REST snapshot | Read-only Beta WS smoke; provider sequencing/replay semantics not certified |
-| Shadow | Pure shadow decisions, journal/audit, fake risk; ML4T 0.1.2 unchanged Strategy integration | Multi-day real reference feed/production parity |
-| Risk | Explicit verified-input policy and fake kill switch | Account-specific verified challenge rules, daily reset behavior, live flatten path |
-| Release | Read-only runbook and NO-GO report | Beta isolation certification, four-week paper, explicit live approval |
+| Identity and transport | Production-only configuration, live-key prefix check, explicit or unique read-only account binding | Provider account-class and financial-consequence guarantee |
+| Native inventory | Funded/active-challenge discovery, complete pages, Decimal values and one-way position guard | Sustained authenticated collection and pagination-shift evidence |
+| Order state | SQLite WAL intent journal, unknown-on-crash and fake-only lifecycle | Remote order transport is intentionally absent |
+| WS state | Authenticated WSS code path, bounded recovery and stable double-REST reconciliation | Provider event sequencing/replay and sustained read-only session evidence |
+| Shadow and ML4T | Same ML4T Strategy class through installed `LiveEngine`; target-weight shim produces audited shadow intents | Multi-day feed continuity and production-price parity |
+| Risk | Explicit verified-input policy, synthetic kill switch and manual halt/reset | Account-specific rules and live recovery path |
+| Release | Redacted read-only account/inventory inspection and synthetic-shadow runbook | Authoritative simulated-account proof, four-week paper record and separate live approval |
 
-The previously shared Propr Beta credential is not set in the current VPS process environment and no project `.env` exists. An unauthenticated Beta health GET responded OK; that does not qualify trading. Never copy credentials into tracked files.
+No account IDs, balances, positions, credentials or unredacted snapshots are committed. The connector does not enable remote order placement.

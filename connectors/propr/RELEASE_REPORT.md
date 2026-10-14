@@ -1,27 +1,36 @@
-# Propr connector qualification — NO-GO
+# Propr connector qualification — NO-GO for execution
 
-Date: 2026-10-13. Repository: `hzminhzz/trading-connector`, milestone Propr Connector, draft PR #13.
+Date: 2026-10-14. Repository: `hzminhzz/trading-connector`, milestone Propr Connector, PR #13.
 
-**Decision: NO-GO for any remote order mutation or live deployment.** No remote orders, cancels, leverage changes or flatten requests have been made.
+**Decision: remote order mutation and live deployment remain NO-GO.** The connector is limited to authenticated read-only inspection and synthetic shadow decisions. No order, cancel, leverage change or flatten request was sent.
 
-Reproducible local checks: **89 passed** with installed ML4T 0.1.2; **69 passed, 16 skipped** in the baseline Python environment without ML4T; Ruff checks passed; `uv build --offline` built sdist and wheel. The GitHub Actions credential-free workflow is committed; GitHub-hosted CI status must be checked separately after push.
+## Verified evidence
+
+- Installed-ML4T connector suite: **93 passed**.
+- `uv run --no-sync ruff check connectors/propr`: **all checks passed**.
+- Baseline connector suite without ML4T: **71 passed, 16 skipped**.
+- `uv build --offline`: built source distribution and wheel.
+- Shadow demo: accepted a valid intent and rejected below-minimum quantity; no network client used.
+- Authenticated production read-only check: health and core service `OK`; unique active challenge account bound; all required financial fields present; orders **0**, positions **0**, trades **0**. Account identifiers, balances and credentials were not printed or recorded.
+- Actual `CryptoTSMOMRegimeStrategy` from `dev/quant/quant-research` ran through the installed `ml4t-live==0.1.2` `LiveEngine` using `ML4TStrategyAdapter`; one synthetic one-bar target intent was accepted by the shadow gateway. The finite feed ended with the expected `feed_terminated` degraded state; no remote order endpoint was invoked.
+- Credential-free CI fixtures cover pagination, account identity, mutation blocking, partial fills, reconciliation faults, WebSocket faults and shadow order decisions.
+
+## Qualification gates
 
 | Gate | Evidence | Disposition |
 | --- | --- | --- |
-| P0 API contract | Official Propr SDK/docs pinned; ml4t-live 0.1.2 inspected; credential-free tests | Source-level evidence, still needs authenticated schema confirmation |
-| Beta risk-free order environment | No definitive official provider assurance; beta policy refuses paper assertion | BLOCKED |
-| Beta account | Previously shared key not found in active process environment or local workspace; no explicit selected account ID | BLOCKED |
-| Beta health | Anonymous read-only `GET https://api.beta.propr.xyz/v1/health` returned HTTP 200 and `status=OK` from VPS | VERIFIED health only, **not** account or execution qualification |
-| Account/inventory | Mocked authenticated `GET` response fixtures; no account secrets | Fixture-qualified only |
-| Intent / cancel / replace | Durable fake-only journal; synthetic timeout/race/restart tests | Fixture-qualified only |
-| WS / recovery | Authenticated-code path, bounded reconnect, dedup, two read-only snapshots, fail-closed unknown state | Fixture-qualified only; no Beta authenticated session |
-| Shadow/ML4T | Same `Strategy` class via native `LiveEngine`; reference-only independent bar feed; synthetic order decisions | Fixture-qualified; no external live session |
-| Prop rules / kill switch | Verified-input fail-closed pretrade risk, latched manual reset and fake cancellation/reduction drills | Synthetic only; actual challenge rule interpretation missing |
-| Simulated order qualification | All remote mutations blocked by policy | BLOCKED by missing simulation proof and separate scoped approval |
-| Four-week paper | No verified duration/performance/fill evidence | NOT MET |
+| API and framework contract | Pinned Propr docs; inspected installed ML4T 0.1.2 interfaces | Implemented and tested |
+| Account identity | Authenticated health, active challenge discovery, exact account binding and complete read-only snapshot | VERIFIED for read-only access only |
+| Account execution class | Public wording does not establish risk-free routing, fees or evaluation/funded-balance effects for this challenge account | UNVERIFIED; mutation gate remains closed |
+| Inventory | Authenticated account-bound read-only snapshot; zero orders, positions and trades | VERIFIED at check time |
+| Intent lifecycle / WebSocket | Deterministic synthetic tests; remote order transport absent | Fixture-qualified only |
+| ML4T shadow integration | Actual project strategy plus target-weight conversion produced one audited shadow decision | Smoke passed; no production price parity claim |
+| Account rules / kill switch | Fail-closed verified-input checks and fake-only kill drills | Synthetic only; live recovery unqualified |
+| Four-week paper record | No verified duration, fill or performance evidence | NOT MET |
+| Live authorization | No separate release authorization or reviewed operational recovery | NOT AUTHORIZED |
 
 ## Unsupported / not authorized
 
-Real market/limit orders, account cancellation or close, non-atomic remote replace, remote flatten, leverage updates, stop-loss and TP conditional submissions, verified native hedge execution, production execution, and live arming.
+Remote market/limit orders, cancellation, replace, close/flatten, leverage changes, stop-loss/TP submission, native hedge execution and live arming.
 
-The signed-off deliverable is a **read-only/synthetic-shadow development candidate**, not a production trading bot. Re-run the release gates after credential/account binding and authoritative simulation proof; do not bypass this report by setting a config flag.
+The deliverable is a **read-only/synthetic-shadow connector candidate**, not a trading bot. The unresolved account-class evidence and four-week paper requirement remain release blockers for execution; no configuration flag can bypass them.

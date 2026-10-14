@@ -2,36 +2,42 @@
 
 ## Startup and binding
 
-1. Review [BETA_SAFETY.md](BETA_SAFETY.md), [COMPATIBILITY.md](COMPATIBILITY.md), and [RELEASE_REPORT.md](RELEASE_REPORT.md). The only authorized remote API calls are GET/HEAD/OPTIONS. No deployment can enable remote order placement.
-2. Select `PROPR_ENV=beta`; set `PROPR_BETA_API_KEY` through a protected VPS secret facility or process environment (not Git, shell history, chat, logs, `--api-key` CLI argument, or fixture). Use a dedicated `pk_beta_` credential. Keep `PROPR_LIVE_API_KEY` out of the Beta process.
-3. Supply an explicit account ID from the Propr dashboard/your own account record. Never default to the first challenge attempt, and never allow a historical account to silently replace a selected one.
-4. Run from repository root with the project's Python environment:
-   `python -m connectors.propr.examples.beta_readonly_smoke --account-id YOUR_ACCOUNT_ID`
-   The command prints only health, account-binding boolean, completeness flags, and inventory counts. No account IDs, PnL, positions or credentials.
-5. Run credential-free shadow drill:
-   `python -m connectors.propr.examples.shadow_demo`.
-6. Run tests with the current installed ML4T environment:
-   `/home/quant/dev/quant/quant-research/.venv/bin/python -m pytest -q connectors/propr/tests`.
+1. Review [COMPATIBILITY.md](COMPATIBILITY.md) and [RELEASE_REPORT.md](RELEASE_REPORT.md). Production REST calls are read-only; shadow decisions never reach an order endpoint.
+2. Provision `PROPR_LIVE_API_KEY` through a protected secret facility. Do not place credentials in Git, shell history, chat, logs, CLI arguments or fixtures.
+3. Either supply an account ID from your Propr dashboard or explicitly request unique-account discovery. Discovery checks funded issuances and active challenge attempts, and refuses zero or multiple matches.
+4. Run from the repository root:
+   ```bash
+   python -m connectors.propr.examples.inspect_account --account-id YOUR_ACCOUNT_ID
+   # or, only when the API returns exactly one account:
+   python -m connectors.propr.examples.inspect_account --discover-unique
+   ```
+   Output contains health, source classification, completeness flags and inventory counts; it omits account IDs, balances, positions and credentials.
+5. Run the credential-free shadow drill:
+   ```bash
+   python -m connectors.propr.examples.shadow_demo
+   ```
+6. Run tests with the installed ML4T environment:
+   ```bash
+   /home/quant/dev/quant/quant-research/.venv/bin/python -m pytest -q connectors/propr/tests
+   ```
 
 ## Fail-closed checks
 
-* No trade if the user-supplied account ID cannot be uniquely matched to a challenge attempt or if the account's verified financial fields are incomplete.
-* Neither Beta nor production has `assert_paper_trading()` or `assert_live_trading()` enabled. Shadow intents cannot invoke a mutation-capable client.
-* Treat any WebSocket disconnect, malformed event, heartbeat timeout, duplicate/out-of-order update, or mismatch between REST inventories as a reconciliation halt. The WS account stream is not an independent market-data feed.
-* On timeout, write unknown intent state; never generate a fresh order ID and retry blindly. On restart, `staged` is recovered as `unknown`. Check provider order and trade identity before any manual clearing.
-* A cancel HTTP 400 does not confirm cancellation. A fake kill-drill reduction ACK never means the position has been flattened.
-* Refuse unknown native symbols, missing tick/lot metadata, hedge positions collapsed to one-way, absent prop challenge rules, stale independent prices, unverified margin mode, unavailable maintenance margin, and breached risk floors.
+- Never infer paper safety from an account name, endpoint, key prefix or challenge status. `assert_paper_trading()` and `assert_live_trading()` refuse.
+- Ambiguous account discovery, financial-field gaps, account mismatches, unsupported symbols, missing precision metadata, hedge positions, stale market data or incomplete reconciliation stop the session.
+- Treat WebSocket disconnects, malformed/duplicate/out-of-order events and REST snapshot mismatches as a reconciliation halt. The account stream is not a market-data feed.
+- On timeout, preserve an unknown outcome; do not retry with a new intent ID. A cancel response or synthetic reduction ACK is not proof of a terminal order or flattened position.
+- No remote order, cancel, replace, leverage change, close or flatten is implemented.
 
-## Incident / kill switch
+## Incident and rollback
 
-1. Latch a local halt; stop strategy submissions first. Isolate credentials if compromise is suspected.
-2. Record fault class and redacted timing/decision evidence, no API response bodies or headers.
-3. Use read-only GET to reconcile *all* paginated orders, native long/short positions and fills against persisted intent IDs. A failed read or inconsistent snapshot is not a successful recovery.
-4. For a **synthetic** drill only, `SyntheticKillDrill` can request cancellation/reduction through an isolated `FakeLifecycleGateway`; it records confirmed terminal statuses and unconfirmed reduction ACKs accurately. **There is currently no remote automatic flatten implementation or permission.** For any real position, manual action in the provider UI is required.
-5. Operator confirms the account, equity, daily reset, margin/leverage limits and that the cause of the halt is addressed. Reset requires explicit manual approval **and** reconciled state; never reset automatically on network reconnect.
-6. If key rotation is needed: revoke at Propr Settings, rotate in the secret store, restart the read-only process, rebind the account and verify snapshots. Never reuse a production key for Beta.
+1. Stop strategy submissions and latch a local halt. Isolate credentials if compromise is suspected.
+2. Preserve redacted fault timing and decision evidence; never log credentials, response bodies or private account data.
+3. Use only read-only GET requests to reconcile paginated orders, native long/short positions and fills. A failed or inconsistent read is not recovery.
+4. Synthetic kill drills use only `FakeLifecycleGateway`. For actual positions, use the provider UI and independently reconcile state.
+5. Reset requires explicit manual approval and reconciled state; never reset automatically after reconnect.
+6. For key rotation, revoke and rotate via Propr Settings/secret storage, restart the read-only process and rebind the account.
 
-## Rollback and production gate
+## Execution gate
 
-* Stop the read-only/shadow session, revoke or rotate the Beta credential if necessary; code checkout rollback to last reviewed SHA is independent of provider state. There are no automatic live orders to reverse.
-* Production requires documented Beta isolation, separately approved remote Beta qualification, full WS/reconciliation testing, verified challenge daily-loss/reset rules, quote-versus-execution parity, a tested live-capable safe flatten/recovery path, at least **four weeks of paper results**, and fresh explicit human authorization. Until every gate is proven: **NO-GO**.
+Challenge-account paper semantics and real-money/evaluation consequences are not independently established. Do not submit orders or change leverage. Live execution additionally requires verified account rules, tested limits/recovery, a four-week paper record, explicit scoped authorization and a separate release decision.

@@ -9,7 +9,7 @@ def test_read_only_transport_rejects_post_before_network():
         calls.append(request.method)
         return httpx.Response(200, json={})
     async def run():
-        rest = ProprRest("https://api.beta.propr.xyz/v1", "dummy", transport=httpx.MockTransport(handler))
+        rest = ProprRest("https://api.propr.xyz/v1", "pk_live_dummy", transport=httpx.MockTransport(handler))
         try:
             with pytest.raises(PermissionError):
                 await rest.request("POST", "/accounts/a/orders", json={})
@@ -24,7 +24,7 @@ def test_pagination_works_past_twenty():
         rows = list(range(offset, min(offset+20, 43)))
         return httpx.Response(200, json={"data": rows})
     async def run():
-        rest = ProprRest("https://api.beta.propr.xyz/v1", "dummy", transport=httpx.MockTransport(handler))
+        rest = ProprRest("https://api.propr.xyz/v1", "pk_live_dummy", transport=httpx.MockTransport(handler))
         try:
             assert await rest.pages("/accounts/a/orders") == list(range(43))
         finally:
@@ -35,7 +35,7 @@ def test_http_errors_redacted():
     def handler(request):
         return httpx.Response(429, json={"private": "never expose"})
     async def run():
-        rest = ProprRest("https://api.beta.propr.xyz/v1", "dummy", transport=httpx.MockTransport(handler))
+        rest = ProprRest("https://api.propr.xyz/v1", "pk_live_dummy", transport=httpx.MockTransport(handler))
         try:
             with pytest.raises(RemoteAPIError, match="429") as err:
                 await rest.request("GET", "/health")

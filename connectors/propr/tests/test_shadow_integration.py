@@ -37,7 +37,7 @@ def test_real_http_mutations_stay_blocked():
         return httpx.Response(200, json={})
     async def run():
         rest = ProprRest(
-            "https://api.beta.propr.xyz/v1", "pk_beta_fake",
+            "https://api.propr.xyz/v1", "pk_live_dummy",
             transport=httpx.MockTransport(handler),
         )
         try:

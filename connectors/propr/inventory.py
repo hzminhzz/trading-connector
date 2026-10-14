@@ -5,6 +5,7 @@ No opaque IDs or balances are printed by summary().
 """
 from dataclasses import dataclass
 from decimal import Decimal
+from urllib.parse import quote
 
 from .models import Order, OrderStatus, Position, finite_decimal, one_way_positions
 from .rest import RemoteAPIError
@@ -114,14 +115,19 @@ def parse_trade(row):
 
 
 class InventoryReader:
-    def __init__(self, rest, account_id):
-        if not isinstance(account_id, str) or not account_id.strip() or "/" in account_id:
-            raise ValueError("Explicit valid account ID required")
+    def __init__(self, rest, account_id: str | None = None):
+        if account_id is not None and (
+            not isinstance(account_id, str) or not account_id.strip() or "/" in account_id
+        ):
+            raise ValueError("Invalid account ID")
         self.rest = rest
         self.account_id = account_id
 
-    async def snapshot(self):
-        base = f"/accounts/{self.account_id}"
+    async def snapshot(self, account_id: str | None = None):
+        account_id = self.account_id if account_id is None else account_id
+        if not isinstance(account_id, str) or not account_id.strip() or "/" in account_id:
+            raise ValueError("Explicit valid account ID required")
+        base = f"/accounts/{quote(account_id, safe='')}"
         orders = tuple(parse_order(x) for x in await self.rest.pages(f"{base}/orders"))
         positions = tuple(parse_position(x) for x in await self.rest.pages(f"{base}/positions"))
         trades = tuple(parse_trade(x) for x in await self.rest.pages(f"{base}/trades"))
@@ -129,7 +135,7 @@ class InventoryReader:
             ids = [item.id for item in collection]
             if len(ids) != len(set(ids)):
                 raise RemoteAPIError("Duplicate inventory identity; pagination may have shifted")
-            if any(item.account_id is not None and item.account_id != self.account_id
+            if any(item.account_id is not None and item.account_id != account_id
                    for item in collection):
                 raise RemoteAPIError("Inventory row account identity mismatch")
         return Inventory(orders, positions, trades)

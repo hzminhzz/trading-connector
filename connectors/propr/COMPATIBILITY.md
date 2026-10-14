@@ -1,36 +1,33 @@
 # Propr connector compatibility record
 
-**Document source pinned:** [XBorgLabs/propr-docs at `fee880982ce3cf36f330fb07a3a9be57ec4dd904`](https://github.com/XBorgLabs/propr-docs/tree/fee880982ce3cf36f330fb07a3a9be57ec4dd904). These are *documented contracts*, not proof of authenticated Beta compatibility.
+**Document source pinned:** [XBorgLabs/propr-docs at `fee880982ce3cf36f330fb07a3a9be57ec4dd904`](https://github.com/XBorgLabs/propr-docs/tree/fee880982ce3cf36f330fb07a3a9be57ec4dd904). These are documented contracts, not proof of paper execution.
 
 | Component | Inspected version/source | Implemented boundary |
 | --- | --- | --- |
-| Propr Python SDK | official `python/propr_sdk.py` `__version__=0.1.0` | Avoid SDK's first-active-account implicit selection and fresh intent IDs on each retry |
-| Propr REST | official `docs/api.md` at SHA above | HTTPS, `X-API-Key`, `limit/offset` GET pagination; POST/PUT/PATCH/DELETE blocked |
-| Propr authenticated WS | official `docs/websocket.md` at SHA above | WSS, `X-API-Key`, `connected.data.userId` handshake, server ping 20s |
-| ml4t-live | **0.1.2** installed at `/home/quant/dev/quant/quant-research/.venv` | Actual `AsyncBrokerProtocol`, `DataFeedProtocol`, `LiveEngine` signatures inspected; integration tests |
-| Independent reference bars | Binance spot WSS closed-kline `<symbol>@kline_1m` | Typed ML4T `MarketEvent` with timestamps, sequence and gap/staleness checks |
+| Propr REST | Official `docs/api.md` at the pinned revision | Production HTTPS, `X-API-Key`, complete GET pagination; mutations blocked |
+| Account discovery | `/book-account-issuances`, `/challenge-attempts?status=active` | Explicit account ID or exactly one unique API result; ambiguous discovery fails closed |
+| Propr authenticated WS | Official `docs/websocket.md` at the pinned revision | WSS, `X-API-Key`, `connected.data.userId` handshake, bounded recovery |
+| ml4t-live | **0.1.2** installed in `/home/quant/dev/quant/quant-research/.venv` | Actual broker/feed/LiveEngine signatures inspected; same Strategy class adapted and exercised in shadow |
+| Independent reference bars | Binance spot WSS closed-kline `<symbol>@kline_1m` | Typed ML4T `MarketEvent` with timestamp, sequence and gap/staleness checks |
 
 ## Provider schema (as published)
 
-* Account: `GET /accounts/{accountId}`, `balance`, `availableBalance`, `totalUnrealizedPnl`, `isolatedPositionMargin`, `crossPositionMargin`, `crossOrderMargin`, `isolatedOrderMargin`, `totalInitialMargin`, `totalMaintenanceMargin`. SDK defines equity as balance + unrealized PnL + isolated position margin. The connector does not call available balance spot cash.
-* Orders: `orderId`, `intentId`, `accountId`, `asset`, `side`, `positionSide`, `status`, `quantity`, `cumulativeQuantity`, `averageFillPrice`, `createdAt`, `updatedAt`; status `partially_filled` is distinct from `filled`.
-* Positions: `positionId`, `asset`, `positionSide`, `quantity`, `leverage`, `marginMode`, `entryPrice`, `markPrice`, `marginUsed`, `liquidationPrice`, `createdAt`.
-* Trades: `tradeId`, `orderId`, `positionId`, `executedAt`, `quantity`, `price`, `fee`.
-* Native symbol format: BTC not BTC/USDC; case-sensitive HIP-3 `xyz:AAPL`. Explicit registry with Decimal size/tick metadata; never infer lot metadata from names.
-* Conditional orders: native `positionId` or grouped entry; batch groups require ULID `orderGroupId`. These are **not exposed** for real mutations.
-* Order create accepts ULID `intentId`; 400 cancel is not proof of absence, and 201 is a documented cancel success. Real remote mutations remain off.
-* Socket events carry `type`, `userId`, `data`, `timestamp`; no authenticated sequence replay guarantee is documented. Reconnect forces two matching complete REST inventories and unresolved-intent checks.
+- Account: `GET /accounts/{accountId}`; financial values are decimal strings. The connector keeps equity, balance, available balance, margin and unrealized PnL distinct.
+- Account sources: funded accounts are listed by `/book-account-issuances`; challenge attempts are listed by `/challenge-attempts`. Challenge accounts are not assumed to be paper accounts.
+- Orders, positions and trades use provider-native IDs and preserve partial-fill, side, timestamp and Decimal evidence.
+- Native symbols are case-sensitive, including HIP-3 symbols such as `xyz:AAPL`; tick, lot and minimum metadata must come from an explicit registry.
+- Conditional order creation, cancel/replace, leverage changes and position closing are not available through the production REST transport.
+- WebSocket events do not document sequence replay or an atomic REST/WS snapshot boundary. Reconnect requires complete REST reconciliation; unresolved outcomes remain halted.
 
 ## Installed ML4T 0.1.2 protocol
 
-`AsyncBrokerProtocol`: `positions`, `pending_orders`, `is_connected`, `execution_capabilities`; `connect`, `disconnect`, `is_connected_async`, `get_positions_async`, `get_pending_orders_async`, `get_position_async`, `get_account_value_async`, `get_cash_async`, `submit_order_async(asset,quantity,side,order_type,limit_price,stop_price,**kwargs)`, `cancel_order_async`, `replace_order_async`, `close_position_async`, `assert_paper_trading`, `assert_live_trading`. `LiveEngine(strategy, broker, feed, halt_on_unhealthy=True)` is tested with the same Strategy class and a shadow order.
+`AsyncBrokerProtocol` and `DataFeedProtocol` signatures were inspected in the installed package. `LiveEngine(strategy, broker, feed, halt_on_unhealthy=True)` runs the unchanged strategy through `ML4TStrategyAdapter`; legacy target-weight calls become bounded shadow intents. `ML4TShadowBroker` exposes no remote mutation methods.
 
-`DataFeedProtocol`: `start`, `stop`, `__aiter__`, `__anext__`, with validated `MarketEvent`; independent Binance spot bars are *reference-only* and are not equivalent to Hyperliquid execution prices. No extrapolation to CFD/perp fill prices is permitted.
+`DataFeedProtocol` receives validated `MarketEvent` values. Binance spot bars are reference-only and are not equivalent to Propr/Hyperliquid execution prices.
 
-## Unresolved provider attestations
+## Unresolved release qualification
 
-1. **Beta is not proven paper/simulation-only.** Neither a Beta URL nor a key prefix guarantees no monetary or evaluation consequences. See [BETA_SAFETY.md](BETA_SAFETY.md).
-2. No Beta account ID or key is available in the active VPS workspace environment as of the verification attempt. The prior shared key was not transferred into this process. Only anonymous `GET /health` was tested successfully.
-3. Authenticated schemas, order/position reconciliations, challenge reset timezone and rule field mapping, and WebSocket event sequencing need real read-only Beta evidence.
-4. No verified point-in-time instrument min step/tick rules, no production market-data/quote parity, no remote stop/TP or order mutation qualification.
-5. No 4-week paper record. **Production = NO-GO.**
+1. The selected account and authenticated read-only schemas can be verified, but public provider wording does not establish that challenge orders are simulated-only or free of financial/evaluation consequences.
+2. The account is not considered paper-safe without an authoritative account-class and order-routing guarantee. `assert_paper_trading()` and all remote mutations remain blocked.
+3. WebSocket sequencing, restart replay, verified tick/lot metadata, provider-specific challenge rules, and quote-to-execution parity remain unqualified.
+4. No four-week paper record or live-trading authorization exists. **Production execution remains NO-GO.**

@@ -1,7 +1,6 @@
-"""Optional ML4T 0.1.2 AsyncBrokerProtocol shadow adapter.
+"""Optional ML4T 0.1.2 shadow adapter and strategy compatibility boundary.
 
-No real execution methods: every ML4T strategy intent becomes an audited
-shadow decision. Paper/live assertions intentionally refuse Propr Beta.
+Every ML4T intent becomes an audited shadow decision; remote mutations remain disabled.
 """
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -12,15 +11,15 @@ from .models import OrderStatus as NativeStatus, one_way_positions
 from .state import UnknownOutcome, new_ulid
 
 try:
+    from ml4t.backtest import Strategy
     from ml4t.live.protocols import (
         AsyncBrokerProtocol, ExecutionCapability, Order, OrderSide,
         OrderType, Position,
     )
     from ml4t.backtest.types import OrderStatus as ML4TOrderStatus
 except ImportError:
-    AsyncBrokerProtocol = ExecutionCapability = Order = OrderSide = OrderType = Position = None
+    Strategy = AsyncBrokerProtocol = ExecutionCapability = Order = OrderSide = OrderType = Position = None
     ML4TOrderStatus = None
-
 
 def _require_ml4t():
     if AsyncBrokerProtocol is None:
@@ -34,6 +33,62 @@ def _time(value):
         return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(UTC)
     except ValueError as exc:
         raise UnknownOutcome("Invalid native position timestamp") from exc
+
+
+class _TargetOrderFacade:
+    """Map legacy target-weight calls onto ML4T's incremental broker API."""
+
+    def __init__(self, broker, data=None):
+        self._broker = broker
+        self._data = data
+
+    def __getattr__(self, name):
+        return getattr(self._broker, name)
+
+    def order_target_percent(self, asset, target_percent):
+        equity = self._broker.get_account_value()
+        if not equity > 0:
+            raise ValueError("Cannot target a portfolio weight without positive equity")
+        row = self._data.get(asset, self._data) if isinstance(self._data, dict) else self._data
+        price = row.get("close", row.get("price")) if isinstance(row, dict) else None
+        if price is None or not Decimal(str(price)).is_finite() or Decimal(str(price)) <= 0:
+            raise ValueError(f"Missing positive reference price for {asset}")
+        position = self._broker.get_position(asset)
+        current_quantity = Decimal(str(position.quantity)) if position else Decimal(0)
+        target_quantity = Decimal(str(equity)) * Decimal(str(target_percent)) / Decimal(str(price))
+        quantity = target_quantity - current_quantity
+        if quantity == 0:
+            return None
+        return self._broker.submit_order(asset, float(quantity))
+
+    def order_target_value(self, asset, target_value):
+        equity = self._broker.get_account_value()
+        if not equity > 0:
+            raise ValueError("Cannot target portfolio value without positive equity")
+        return self.order_target_percent(asset, float(target_value) / equity)
+
+
+class ML4TStrategyAdapter(Strategy if Strategy is not None else object):
+    """Run a synchronous ``ml4t.backtest.Strategy`` through LiveEngine unchanged."""
+
+    def __init__(self, strategy):
+        _require_ml4t()
+        super().__init__()
+        self.strategy = strategy
+
+    def __getattr__(self, name):
+        return getattr(self.strategy, name)
+
+    def on_start(self, broker):
+        return self.strategy.on_start(_TargetOrderFacade(broker))
+
+    def on_data(self, timestamp, data, context, broker):
+        return self.strategy.on_data(
+            timestamp, data, context, _TargetOrderFacade(broker, data)
+        )
+
+    def on_end(self, broker):
+        return self.strategy.on_end(_TargetOrderFacade(broker))
 
 
 class ML4TShadowBroker:
@@ -107,10 +162,14 @@ class ML4TShadowBroker:
         result = await self.account_reader.inspect()
         if not result["account_bound"] or not result["financial_fields_verified"]:
             raise UnknownOutcome("Read-only account identity or equity not verified")
-        inventory = await self.inventory_reader.snapshot()
+        account_id = result["snapshot"].account_id
+        selected_id = getattr(self.inventory_reader, "account_id", None)
+        if selected_id is not None and selected_id != account_id:
+            raise UnknownOutcome("Inventory reader is bound to a different account")
+        inventory = await self.inventory_reader.snapshot(account_id=account_id)
         self._inventory = inventory
         self._account = result["snapshot"]
-        # Reject unmappable native hedge positions before reporting ready.
+        self.account_source = result["account_source"]
         _ = self.positions
         self.reconciler.assert_opening_safe()
         self._connected = True
@@ -122,7 +181,7 @@ class ML4TShadowBroker:
         return self.is_connected
 
     def assert_paper_trading(self) -> None:
-        raise PermissionError("Propr Beta simulation-only semantics remain unverified")
+        raise PermissionError("Propr challenge-account paper execution is not independently verified")
 
     def assert_live_trading(self) -> None:
         raise PermissionError("Propr live order execution has not been approved")
@@ -189,12 +248,21 @@ class ML4TShadowBroker:
             ("long" if current.quantity > 0 else "short") if current
             else ("long" if actual_side is OrderSide.BUY else "short")
         )
+        position_id = None
+        if reduce_only:
+            native_positions = [
+                item for item in self._inventory.positions
+                if item.asset == asset and item.quantity > 0
+            ]
+            if len(native_positions) != 1:
+                raise ValueError("Reduce-only intent requires one exact native position")
+            position_id = native_positions[0].id
         request = OrderRequest(
             account_id=self._account.account_id, asset=asset,
             side=actual_side.value, position_side=position_side,
             quantity=qty, reduce_only=reduce_only, order_type=order_type.value,
             limit_price=Decimal(str(limit_price)) if limit_price is not None else None,
-            position_id=(self._inventory.positions[0].id if reduce_only and len(self._inventory.positions) == 1 else None),
+            position_id=position_id,
         )
         decision = await self.shadow.submit(request)
         return Order(

@@ -52,7 +52,7 @@ def test_inventory_paginates_and_preserves_hedges():
 
     async def run():
         rest = ProprRest(
-            "https://api.beta.propr.xyz/v1", "dummy",
+            "https://api.propr.xyz/v1", "pk_live_dummy",
             transport=httpx.MockTransport(handler),
         )
         try:
@@ -104,7 +104,7 @@ def test_wrong_account_rejected():
                 rows = []
             return httpx.Response(200, json={"data": rows})
         rest = ProprRest(
-            "https://api.beta.propr.xyz/v1", "dummy",
+            "https://api.propr.xyz/v1", "pk_live_dummy",
             transport=httpx.MockTransport(handler),
         )
         try:
@@ -112,4 +112,14 @@ def test_wrong_account_rejected():
                 await InventoryReader(rest, "selected").snapshot()
         finally:
             await rest.close()
+    asyncio.run(run())
+
+
+def test_explicit_empty_account_does_not_fall_back_to_bound_account():
+    reader = InventoryReader(None, "selected")
+
+    async def run():
+        with pytest.raises(ValueError, match="valid account ID"):
+            await reader.snapshot("")
+
     asyncio.run(run())

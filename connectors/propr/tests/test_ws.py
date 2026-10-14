@@ -45,12 +45,12 @@ def test_authenticated_snapshot_event_and_reconcile(tmp_path):
     ]
     observed = []
     ws = AccountWebSocket(
-        ws_url="wss://api.beta.propr.xyz/ws", api_key="pk_beta_fake",
+        ws_url="wss://api.propr.xyz/ws", api_key="pk_live_dummy",
         reconciler=reconciler, connector=fake_connector(messages, observed),
     )
     asyncio.run(ws.run_once(max_events=1))
     assert len(observed) == 1
-    assert observed[0][1]["additional_headers"]["X-API-Key"] == "pk_beta_fake"
+    assert observed[0][1]["additional_headers"]["X-API-Key"] == "pk_live_dummy"
     assert reader.count == 4
     assert not reconciler.ready
     assert not ws.health.authenticated
@@ -71,7 +71,7 @@ def test_ws_invalid_identity_or_event_fails_closed(tmp_path, messages):
     journal = IntentJournal(tmp_path / "j.db")
     reconciler = AccountReconciler(FakeReader(), journal)
     ws = AccountWebSocket(
-        ws_url="wss://api.beta.propr.xyz/ws", api_key="pk_beta_fake",
+        ws_url="wss://api.propr.xyz/ws", api_key="pk_live_dummy",
         reconciler=reconciler, connector=fake_connector(messages, []),
     )
     with pytest.raises(UnknownOutcome):
@@ -86,7 +86,7 @@ def test_unknown_intent_blocks_ws_ready(tmp_path):
     journal.mark(intent.id, "unknown")
     reconciler = AccountReconciler(FakeReader(), journal)
     ws = AccountWebSocket(
-        ws_url="wss://api.beta.propr.xyz/ws", api_key="pk_beta_fake",
+        ws_url="wss://api.propr.xyz/ws", api_key="pk_live_dummy",
         reconciler=reconciler,
         connector=fake_connector([json.dumps({"type": "connected", "data": {"userId": "u"}})], []),
     )

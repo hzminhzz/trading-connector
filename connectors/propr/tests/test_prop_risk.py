@@ -72,6 +72,12 @@ def test_risk_passes_only_after_manual_arming(tmp_path):
     ({"high_water_equity": D("1300")}, "Drawdown"),
     ({"account": snapshot(equity=D("400"))}, "equity floor"),
     ({"gross_notional_before": D("9999")}, "exposure"),
+    ({"reconciled": False}, "stale"),
+    ({"leverage_limit_verified": False}, "stale"),
+    ({"existing_liquidation_prices_verified": False}, "stale"),
+    ({"margin_mode": None}, "Margin mode"),
+    ({"gross_notional_before": None}, "Missing"),
+    ({"account": snapshot(margin=D("600"))}, "Total margin budget"),
 ])
 def test_risk_breaches_latch(tmp_path, changed, reason):
     journal = IntentJournal(tmp_path / "risk.db")

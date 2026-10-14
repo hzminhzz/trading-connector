@@ -1,10 +1,43 @@
-"""Read-only Propr account snapshot with explicit challenge ownership binding."""
+"""Read-only Propr account snapshot with exact account-source binding."""
 from dataclasses import dataclass
 from decimal import Decimal
+from urllib.parse import quote
 
 from .config import ProprConfig, Mode
 from .models import finite_decimal
 from .rest import ProprRest, RemoteAPIError
+
+
+@dataclass(frozen=True)
+class AccountBinding:
+    account_id: str
+    source: str
+    attempt_id: str | None
+
+
+async def discover_account(rest, account_id: str | None = None) -> AccountBinding:
+    records = []
+    for path, source in (
+        ("/book-account-issuances", "funded"),
+        ("/challenge-attempts?status=active", "challenge"),
+    ):
+        rows = await rest.pages(path)
+        for row in rows:
+            if (
+                not isinstance(row, dict)
+                or not isinstance(row.get("accountId"), str)
+                or not row["accountId"]
+            ):
+                raise RemoteAPIError("Unexpected account-discovery response")
+            attempt_id = row.get("attemptId")
+            if attempt_id is not None and not isinstance(attempt_id, str):
+                raise RemoteAPIError("Unexpected account-discovery response")
+            records.append(AccountBinding(row["accountId"], source, attempt_id))
+
+    matching = [record for record in records if account_id is None or record.account_id == account_id]
+    if len(matching) != 1:
+        raise RemoteAPIError("Account identity is absent or ambiguous")
+    return matching[0]
 
 
 @dataclass(frozen=True)
@@ -68,8 +101,12 @@ def parse_account(account_id, attempt_id, raw):
 
 class ReadOnlyAccount:
     def __init__(self, config: ProprConfig, transport=None):
-        if not isinstance(config.account_id, str) or not config.account_id.strip() or "/" in config.account_id:
-            raise ValueError("Explicit account ID required for account inspection")
+        if config.account_id is not None and (
+            not isinstance(config.account_id, str)
+            or not config.account_id.strip()
+            or "/" in config.account_id
+        ):
+            raise ValueError("Invalid account ID")
         if not config.api_key:
             raise ValueError("Explicit API key required")
         if config.mode is not Mode.READ_ONLY:
@@ -79,18 +116,21 @@ class ReadOnlyAccount:
 
     async def inspect(self):
         health = await self.rest.request("GET", "/health")
+        services = await self.rest.request("GET", "/health/services")
         if not isinstance(health, dict) or health.get("status") != "OK":
             raise RemoteAPIError("Health check failed")
-        attempts = await self.rest.pages("/challenge-attempts")
-        matching = [a for a in attempts if a.get("accountId") == self.config.account_id]
-        if len(matching) != 1:
-            raise RemoteAPIError("Account identity not uniquely established")
-        attempt = matching[0]
-        account = await self.rest.request("GET", f"/accounts/{self.config.account_id}")
-        snapshot = parse_account(self.config.account_id, attempt.get("attemptId"), account)
+        if not isinstance(services, dict) or services.get("core") != "OK":
+            raise RemoteAPIError("Core service health check failed")
+        binding = await discover_account(self.rest, self.config.account_id)
+        account = await self.rest.request("GET", f"/accounts/{quote(binding.account_id, safe='')}")
+        snapshot = parse_account(binding.account_id, binding.attempt_id, account)
         return {
-            "healthy": True, "account_bound": True,
-            "financial_fields_verified": snapshot.complete, "snapshot": snapshot,
+            "healthy": True,
+            "services_healthy": True,
+            "account_bound": True,
+            "account_source": binding.source,
+            "financial_fields_verified": snapshot.complete,
+            "snapshot": snapshot,
         }
 
     async def close(self):
