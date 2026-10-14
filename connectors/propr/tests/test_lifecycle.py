@@ -2,7 +2,7 @@ import asyncio
 from decimal import Decimal as D
 import pytest
 from connectors.propr.lifecycle import FakeLifecycleGateway, FakeLifecycleVenue, NativePosition
-from connectors.propr.execution import OrderRequest
+from connectors.propr.execution import FakeOrderResult, OrderRequest
 from connectors.propr.instruments import Instrument, InstrumentRegistry
 from connectors.propr.state import IntentJournal, UnknownOutcome
 
@@ -46,6 +46,22 @@ def test_replace_requires_no_partial_fill(tmp_path):
         with pytest.raises(UnknownOutcome):
             await gateway.replace(intent.id, request)
         assert len([c for c in venue.calls if c[0] == "submit"]) == 1
+    asyncio.run(run())
+    journal.close()
+
+
+def test_replace_rejects_partial_quantity_from_order_result(tmp_path):
+    journal, venue, gateway = make(tmp_path)
+
+    async def run():
+        request = OrderRequest("a", "BTC", "buy", "long", D("1"))
+        intent, _ = await gateway.submit(request)
+        venue.orders[intent.id] = FakeOrderResult("partial", D(".5"))
+        with pytest.raises(UnknownOutcome, match="partial fill"):
+            await gateway.replace(intent.id, request)
+        assert venue.orders[intent.id] == FakeOrderResult("cancelled", D(".5"))
+        assert len([call for call in venue.calls if call[0] == "submit"]) == 1
+
     asyncio.run(run())
     journal.close()
 
