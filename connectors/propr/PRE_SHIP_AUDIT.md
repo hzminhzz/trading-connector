@@ -40,3 +40,10 @@ Merge only as a read-only/synthetic-shadow connector candidate after final CI ch
 1. Obtain authoritative Propr account-class, order-routing, fee and evaluation/funded-balance consequences for this challenge.
 2. Accumulate and verify the required four-week paper record.
 3. Complete provider-specific rules, event-replay, market-price parity and live recovery qualification before any separate execution approval.
+
+## Post-merge regression follow-up
+
+- A post-merge review found cancel/replace could overlook a cumulative partial fill stored in the fake order result when the separate fill accumulator was empty.
+- `FakeLifecycleGateway.replace()` now checks both fill sources and blocks replacement after any fill; a regression test exercises a partial result followed by cancellation.
+- Follow-up verification: **107 passed** with ML4T; **84 passed, 16 skipped** without ML4T; Ruff and offline package build passed.
+- Live execution remains **NO-GO** under the external blockers above.

@@ -65,8 +65,16 @@ class FakeLifecycleGateway(FakeExecutionGateway):
         if status != "cancelled":
             self.journal.mark(original_intent_id, "unknown")
             raise UnknownOutcome("Replace aborted: old order may have filled")
-        # Reject if any partial fill occurred, even when cancellation succeeded.
-        if self.venue.filled_quantities.get(original_intent_id, Decimal(0)) != 0:
+        # Preserve fills reported by either the venue result or the legacy accumulator.
+        result = self.venue.orders.get(original_intent_id)
+        cumulative = (
+            result.cumulative_quantity if isinstance(result, FakeOrderResult) else Decimal(0)
+        )
+        filled = max(
+            self.venue.filled_quantities.get(original_intent_id, Decimal(0)),
+            cumulative,
+        )
+        if filled != 0:
             self.journal.mark(original_intent_id, "unknown")
             raise UnknownOutcome("Replace aborted: partial fill during cancel gap")
         return await self.submit(request)
