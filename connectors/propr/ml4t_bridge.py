@@ -323,8 +323,14 @@ class ProprLiveBroker:
         self._account_data: dict[str, Any] = {}
     @property
     def execution_capabilities(self) -> frozenset:
-        return frozenset({ExecutionCapability.LIMIT} if ExecutionCapability is not None else ())
-
+        caps = set()
+        if ExecutionCapability is not None:
+            caps.update({
+                ExecutionCapability.LIMIT,
+                ExecutionCapability.STOP,
+                ExecutionCapability.STOP_LIMIT,
+            })
+        return frozenset(caps)
     @property
     def is_connected(self) -> bool:
         return self._connected
@@ -432,7 +438,11 @@ class ProprLiveBroker:
     async def get_pending_orders_async(self, asset: str | None = None) -> list[Any]:
         await self._sync_state()
         if asset:
-            return [o for o in self._pending_orders if o.asset == asset]
+            target = asset.split("/")[0] if "/" in asset else asset
+            return [
+                o for o in self._pending_orders
+                if o.asset == asset or o.asset.split("/")[0] == target
+            ]
         return list(self._pending_orders)
 
     async def get_account_value_async(self) -> float:
@@ -496,8 +506,14 @@ class ProprLiveBroker:
             position_side = "long" if order_side == OrderSide.BUY else "short"
 
         resolved_order_type = OrderType.MARKET if order_type is None else OrderType(order_type)
-        api_order_type = "limit" if (resolved_order_type == OrderType.LIMIT or limit_price is not None) else "market"
-
+        if resolved_order_type == OrderType.STOP:
+            api_order_type = "stop_market"
+        elif resolved_order_type == OrderType.STOP_LIMIT:
+            api_order_type = "stop_limit"
+        elif resolved_order_type == OrderType.LIMIT or limit_price is not None:
+            api_order_type = "limit"
+        else:
+            api_order_type = "market"
         # Stage intent into durable SQLite WAL before network transmission
         pos_id = (
             getattr(existing, "_position_id", None)
@@ -527,6 +543,7 @@ class ProprLiveBroker:
                 quote=quote,
                 quantity=str(qty),
                 price=str(limit_price) if limit_price is not None else None,
+                trigger_price=str(stop_price) if stop_price is not None else None,
                 reduce_only=reduce_only,
             )
             if not orders:
