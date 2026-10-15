@@ -77,7 +77,7 @@ class BybitClient:
 
     @staticmethod
     def _v5_result(response: Any, endpoint: str) -> dict[str, Any]:
-        if not isinstance(response, dict) or response.get("retCode") != 0:
+        if not isinstance(response, dict) or response.get("retCode") not in (0, "0"):
             raise BybitSnapshotError(f"{endpoint}: missing/failed V5 response")
         result = response.get("result")
         if not isinstance(result, dict):
@@ -112,13 +112,17 @@ class BybitClient:
         if (
             not uid or uid != cfg.expected_demo_uid.strip()
             or key_info.get("apiKey") != cfg.api_key
-            or key_info.get("uta") != 1
+            or str(key_info.get("uta")) != "1"
         ):
             raise BybitSnapshotError("demo_identity: authenticated UID, key or UTA does not match")
         account_info = self._v5_result(
             await self._exchange.private_get_v5_account_info(), "demo_account_info"
         )
-        if account_info.get("unifiedMarginStatus") not in (3, 4, 5, 6):
+        try:
+            margin_status = int(account_info.get("unifiedMarginStatus"))
+        except (TypeError, ValueError):
+            margin_status = None
+        if margin_status not in (3, 4, 5, 6):
             raise BybitSnapshotError("demo_identity: unsupported unified account status")
         self._verified_demo_identity = {
             "environment": "demo",
@@ -126,7 +130,7 @@ class BybitClient:
             "authenticated_uid_matches_expected": True,
             "dedicated_demo_key_matches": True,
             "unified_account_verified": True,
-            "key_is_read_only": key_info.get("readOnly") == 1,
+            "key_is_read_only": str(key_info.get("readOnly")) == "1",
         }
 
     async def fetch_demo_account_summary(self) -> BybitAccountSummary:
@@ -207,7 +211,7 @@ class BybitClient:
                     raise BybitSnapshotError("demo_positions: invalid size")
                 if size == 0:
                     continue
-                if category != "linear" or row.get("positionIdx") != 0:
+                if category != "linear" or row.get("positionIdx") not in (0, "0"):
                     raise BybitSnapshotError("demo_positions: active unsupported category/hedge position")
                 if row.get("side") not in ("Buy", "Sell"):
                     raise BybitSnapshotError("demo_positions: unknown position side")
@@ -244,7 +248,7 @@ class BybitClient:
             if settle:
                 params["settleCoin"] = settle
             for row in await self._demo_pages("private_get_v5_order_realtime", params):
-                if category != "linear" or row.get("positionIdx") != 0:
+                if category != "linear" or row.get("positionIdx") not in (0, "0"):
                     raise BybitSnapshotError("demo_orders: active unsupported category/hedge order")
                 if row.get("stopOrderType") not in (None, "", "UNKNOWN"):
                     raise BybitSnapshotError("demo_orders: conditional order not representable")

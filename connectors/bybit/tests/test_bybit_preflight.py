@@ -281,3 +281,33 @@ def test_demo_order_contract_rejects_unrepresentable_active_orders(exchange, dem
         await client.close()
     asyncio.run(run())
     exchange.create_order.assert_not_awaited()
+
+
+def test_demo_identity_and_snapshots_support_string_response_fields(exchange, demo_config):
+    exchange.private_get_v5_user_query_api.return_value = {
+        "retCode": "0",
+        "result": {"apiKey": "demo-synthetic-key", "userID": "24680", "uta": "1", "readOnly": "0"},
+    }
+    exchange.private_get_v5_account_info.return_value = {
+        "retCode": "0", "result": {"unifiedMarginStatus": "3"},
+    }
+    exchange.private_get_v5_account_wallet_balance.return_value = {
+        "retCode": "0", "result": {"list": [{
+            "accountType": "UNIFIED",
+            "totalEquity": "5000.10",
+            "totalAvailableBalance": "4800.25",
+        }]},
+    }
+    client = BybitClient(demo_config, exchange=exchange)
+
+    async def run():
+        await client.connect()
+        assert client.demo_identity_verified is True
+        assert client.demo_identity_evidence["authenticated_uid_matches_expected"] is True
+        assert client.demo_identity_evidence["key_is_read_only"] is False
+        summary = await client.fetch_demo_account_summary()
+        assert str(summary.equity_usd) == "5000.10"
+        await client.close()
+
+    asyncio.run(run())
+    exchange.create_order.assert_not_awaited()

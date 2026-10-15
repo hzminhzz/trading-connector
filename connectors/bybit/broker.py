@@ -111,6 +111,8 @@ class BybitLiveBroker:
         return self._cash
 
     async def get_positions_async(self) -> dict[str, Position]:
+        if not self._connected:
+            raise RuntimeError("Bybit position snapshot unavailable while disconnected")
         await self._sync_positions()
         return dict(self._positions)
 
@@ -123,6 +125,8 @@ class BybitLiveBroker:
         )
 
     async def get_pending_orders_async(self, asset: str | None = None) -> list[Order]:
+        if not self._connected:
+            raise RuntimeError("Bybit pending orders snapshot unavailable while disconnected")
         await self._sync_orders(asset)
         if asset is None:
             return list(self._pending_orders)
@@ -379,13 +383,15 @@ class BybitLiveBroker:
             side=side,
             quantity=float(o.quantity),
             order_type=order_type,
-            limit_price=float(o.price) if o.price is not None else None,
+            limit_price=(float(o.price) if o.price is not None and o.order_type == "limit" else None),
             order_id=o.order_id,
             status=order_status,
             created_at=(datetime.fromtimestamp(o.timestamp / 1000, UTC)
                         if o.timestamp is not None else datetime.now(UTC)),
             filled_quantity=float(o.filled_quantity),
             filled_price=float(o.price) if o.price is not None else None,
+            filled_at=(datetime.fromtimestamp(o.timestamp / 1000, UTC)
+                       if order_status == OrderStatus.FILLED and o.timestamp is not None else None),
         )
 
     def _to_exchange_symbol(self, asset: str) -> str:

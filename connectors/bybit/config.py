@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 
@@ -24,8 +24,8 @@ class Mode(str, Enum):
 class BybitConfig:
     environment: Environment = Environment.TESTNET
     mode: Mode = Mode.READ_ONLY
-    api_key: str | None = None
-    api_secret: str | None = None
+    api_key: str | None = field(default=None, repr=False)
+    api_secret: str | None = field(default=None, repr=False)
     default_type: str = "swap"  # Linear USDT perpetuals default
     subaccount_id: str | None = None
     expected_demo_uid: str | None = None
@@ -42,15 +42,19 @@ class BybitConfig:
 
     @classmethod
     def from_env(cls, env_path: str | Path | None = None) -> BybitConfig:
-        try:
-            from dotenv import load_dotenv
+        if not os.getenv("PYTHON_DOTENV_DISABLED"):
+            try:
+                from dotenv import load_dotenv
 
-            if env_path:
-                _ = load_dotenv(env_path)
-            else:
-                _ = load_dotenv()
-        except ImportError:
-            pass
+                if env_path:
+                    _ = load_dotenv(env_path)
+                else:
+                    demo_env = Path.home() / ".config" / "trading-connector" / "bybit-demo.env"
+                    if demo_env.is_file():
+                        _ = load_dotenv(demo_env)
+                    _ = load_dotenv()
+            except ImportError:
+                pass
 
         explicit_environment = os.getenv("BYBIT_ENVIRONMENT")
         if explicit_environment is not None:
