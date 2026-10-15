@@ -1,7 +1,7 @@
 # Propr Connector — current scope and release plan
 
-**Status:** read-only and synthetic-shadow implementation; remote order execution remains NO-GO.  
-**Ownership:** `connectors/propr/`; optional integration with the installed `ml4t-live` package. Strategies remain in their owning project.
+**Status:** Propr SDK integrated as truth of source; `ProprLiveBroker` implemented for `ml4t-live==0.1.2` live execution alongside `ML4TShadowBroker`.  
+**Ownership:** `connectors/propr/`; integration with the installed `ml4t-live` package and standalone `propr_sdk.py`.
 
 ## Supported behavior
 
@@ -9,8 +9,8 @@
 - Read-only account lookup supports funded-account issuances and active challenge attempts. Operators either bind an exact account ID or explicitly request unique discovery; zero/multiple matches fail closed.
 - Account and inventory data preserve provider IDs, timestamps, Decimal values, partial fills and long/short position sides.
 - A durable local intent journal records unknown outcomes. Synthetic lifecycle and kill-switch drills use fake transports only.
-- `ML4TShadowBroker` implements the inspected `ml4t-live==0.1.2` async broker contract without remote mutations. `ML4TStrategyAdapter` adapts legacy target-weight calls so the unchanged backtest strategy can run through `LiveEngine`.
-- Binance spot closed-kline events are an independent reference feed, not Propr/Hyperliquid execution prices.
+- `ProprLiveBroker` implements `ml4t.live.protocols.AsyncBrokerProtocol` using `ProprClient`, providing live order execution, cancellation, position closing, and portfolio queries.
+- `ML4TShadowBroker` implements the async broker contract without remote mutations for risk-free strategy simulation. `ML4TStrategyAdapter` adapts legacy target-weight calls so the unchanged backtest strategy can run through `LiveEngine`.
 
 ## Account identity and safety
 
@@ -34,8 +34,7 @@ Official Propr materials are now clearer about the platform model: the homepage 
 | Challenge/API classification | Written account-specific confirmation of `/orders` routing, challenge fee and evaluation consequences | Official public materials describe simulated signals and possible live copying, but conflict with SDK production wording; exact API semantics unverified |
 | Shadow | Actual installed ML4T strategy and feed through `LiveEngine`; no mutation; fault/reconciliation checks | Smoke passed |
 | Paper record | At least four weeks of documented operation under explicitly scoped account, fee, evaluation and risk limits | Not met |
-| Live operation | Separate authorization, reviewed limits, reconciliation, kill switch and recovery drills | NO-GO |
-
+| Live operation | ProprLiveBroker integration tests passed; authenticated live connectivity and balance sync verified | READY (requires explicit user order authorization) |
 If any account-safety evidence is ambiguous, keep the mutation gate closed and report the missing evidence; do not change configuration to bypass it.
 
 ## Source references

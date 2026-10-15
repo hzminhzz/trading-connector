@@ -2,13 +2,15 @@
 
 Every ML4T intent becomes an audited shadow decision; remote mutations remain disabled.
 """
+import asyncio
 from datetime import UTC, datetime
 from decimal import Decimal
+from pathlib import Path
 from typing import Any
 
 from .execution import OrderRequest
 from .models import OrderStatus as NativeStatus, one_way_positions
-from .state import UnknownOutcome, new_ulid
+from .state import IntentJournal, UnknownOutcome, new_ulid
 
 try:
     from ml4t.backtest import Strategy
@@ -20,6 +22,14 @@ try:
 except ImportError:
     Strategy = AsyncBrokerProtocol = ExecutionCapability = Order = OrderSide = OrderType = Position = None
     ML4TOrderStatus = None
+
+try:
+    from propr_sdk import ProprClient
+except ImportError:
+    try:
+        from .sdk import ProprClient
+    except ImportError:
+        ProprClient = None
 
 def _require_ml4t():
     if AsyncBrokerProtocol is None:
@@ -281,3 +291,292 @@ class ML4TShadowBroker:
 
     async def close_position_async(self, asset: str):
         raise PermissionError("Shadow adapter cannot close remote positions")
+
+
+class ProprLiveBroker:
+    """Live ML4T 0.1.2 AsyncBrokerProtocol adapter powered directly by ProprClient."""
+
+    def __init__(
+        self,
+        client: Any = None,
+        account_id: str | None = None,
+        journal: Any = None,
+        journal_path: str | Path | None = None,
+    ):
+        _require_ml4t()
+        if client is None:
+            if ProprClient is None:
+                raise ImportError("propr_sdk is not available")
+            client = ProprClient()
+        self.client = client
+        self._target_account_id = account_id
+        if journal is not None:
+            self.journal = journal
+        else:
+            resolved_acc = account_id or getattr(client, "account_id", None) or "default"
+            safe_acc = "".join(c if c.isalnum() or c in ("-", "_") else "_" for c in str(resolved_acc))
+            path = journal_path or Path(f".propr_intent_journal_{safe_acc}.db")
+            self.journal = IntentJournal(str(path))
+        self._connected = False
+        self._positions: dict[str, Any] = {}
+        self._pending_orders: list[Any] = []
+        self._account_data: dict[str, Any] = {}
+    @property
+    def execution_capabilities(self) -> frozenset:
+        return frozenset({ExecutionCapability.LIMIT} if ExecutionCapability is not None else ())
+
+    @property
+    def is_connected(self) -> bool:
+        return self._connected
+
+    @property
+    def positions(self) -> dict[str, Any]:
+        return dict(self._positions)
+
+    @property
+    def pending_orders(self) -> list[Any]:
+        return list(self._pending_orders)
+
+    async def connect(self) -> None:
+        await asyncio.to_thread(self.client.setup, self._target_account_id)
+        await self._sync_state()
+        self._connected = True
+
+    async def disconnect(self) -> None:
+        self._connected = False
+
+    async def is_connected_async(self) -> bool:
+        return self._connected
+
+    def assert_paper_trading(self) -> None:
+        raise PermissionError(
+            "Propr challenge accounts execute on live venues and are not verified paper-only"
+        )
+
+    def assert_live_trading(self) -> None:
+        if not self._connected or not getattr(self.client, "account_id", None):
+            raise RuntimeError("Live trading requires a connected, explicitly bound account")
+    async def _sync_state(self) -> None:
+        raw_positions = await asyncio.to_thread(self.client.get_open_positions)
+        new_positions = {}
+        for p in raw_positions:
+            asset = p.get("asset") or f"{p.get('base')}/{p.get('quote', 'USDC')}"
+            qty = float(p.get("quantity", 0))
+            if p.get("positionSide") == "short":
+                qty = -abs(qty)
+            entry_px = float(p.get("entryPrice") or 0.0)
+            mark_px = float(p.get("markPrice") or entry_px)
+            created_str = p.get("createdAt") or datetime.now(UTC).isoformat()
+            base_sym = p.get("base") or (asset.split("/")[0] if "/" in asset else asset)
+            pos = Position(
+                asset=asset,
+                quantity=qty,
+                entry_price=entry_px,
+                entry_time=_time(created_str),
+                current_price=mark_px,
+            )
+            pos._position_id = p.get("positionId")
+            new_positions[asset] = pos
+            new_positions[base_sym] = pos
+        self._positions = new_positions
+
+        raw_orders = await asyncio.to_thread(self.client.get_orders, status="open")
+        self._pending_orders = [self._parse_order(o) for o in raw_orders]
+
+        if hasattr(self.client, "get_account"):
+            self._account_data = await asyncio.to_thread(self.client.get_account)
+        else:
+            acc = await asyncio.to_thread(self.client._get, self.client._account_path(""))
+            self._account_data = acc.get("data", acc) if isinstance(acc, dict) else {}
+
+    def _parse_order(self, o: dict[str, Any]) -> Any:
+        raw_asset = str(o.get("asset") or o.get("base") or "")
+        quote = o.get("quote") or "USDC"
+        asset = f"{raw_asset}/{quote}" if "/" not in raw_asset else raw_asset
+        side = OrderSide.BUY if o.get("side", "").lower() == "buy" else OrderSide.SELL
+        order_type = OrderType.LIMIT if o.get("type", "").lower() == "limit" else OrderType.MARKET
+        price = float(o["price"]) if o.get("price") is not None else None
+        status_str = o.get("status", "").lower()
+        if status_str in ("open", "pending"):
+            status = ML4TOrderStatus.PENDING
+        elif status_str in ("filled",):
+            status = ML4TOrderStatus.FILLED
+        elif status_str in ("cancelled", "canceled"):
+            status = ML4TOrderStatus.CANCELLED
+        elif status_str in ("rejected",):
+            status = ML4TOrderStatus.REJECTED
+        else:
+            status = ML4TOrderStatus.PENDING
+        created_at = _time(o.get("createdAt")) if o.get("createdAt") else datetime.now(UTC)
+        return Order(
+            asset=asset,
+            side=side,
+            quantity=float(o.get("quantity", 0)),
+            order_type=order_type,
+            limit_price=price,
+            order_id=str(o.get("orderId", "")),
+            status=status,
+            created_at=created_at,
+            filled_quantity=float(o.get("cumulativeQuantity", 0)),
+            filled_price=float(o["averageFillPrice"]) if o.get("averageFillPrice") else None,
+        )
+
+    async def get_positions_async(self) -> dict[str, Any]:
+        await self._sync_state()
+        return dict(self._positions)
+
+    async def get_position_async(self, asset: str) -> Any | None:
+        positions = await self.get_positions_async()
+        return positions.get(asset)
+
+    async def get_pending_orders_async(self, asset: str | None = None) -> list[Any]:
+        await self._sync_state()
+        if asset:
+            return [o for o in self._pending_orders if o.asset == asset]
+        return list(self._pending_orders)
+
+    async def get_account_value_async(self) -> float:
+        await self._sync_state()
+        margin_balance = self._account_data.get("marginBalance")
+        if margin_balance is not None:
+            return float(margin_balance)
+        balance = float(self._account_data.get("balance", 0))
+        upnl = float(self._account_data.get("totalUnrealizedPnl", 0))
+        isolated = float(self._account_data.get("isolatedPositionMargin", 0))
+        return balance + upnl + isolated
+
+    async def get_cash_async(self) -> float:
+        await self._sync_state()
+        available = self._account_data.get("availableBalance")
+        if available is not None:
+            return float(available)
+        return float(self._account_data.get("balance", 0))
+
+    async def submit_order_async(
+        self,
+        asset: str,
+        quantity: float,
+        side: Any | None = None,
+        order_type: Any = None,
+        limit_price: float | None = None,
+        stop_price: float | None = None,
+        **kwargs: Any,
+    ) -> Any:
+        if not self._connected:
+            raise RuntimeError("Broker not connected. Call connect() first.")
+
+        base, quote = (asset.split("/", 1) if "/" in asset else (asset, "USDC"))
+        propr_asset = base
+
+        if side is None:
+            order_side = OrderSide.BUY if quantity > 0 else OrderSide.SELL
+            qty = abs(quantity)
+        else:
+            order_side = OrderSide(side)
+            qty = abs(quantity)
+
+        await self._sync_state()
+        existing = (
+            self._positions.get(asset)
+            or self._positions.get(propr_asset)
+            or self._positions.get(base)
+        )
+        position_side = "long"
+        reduce_only = False
+        if existing and existing.quantity != 0:
+            if existing.quantity > 0:
+                position_side = "long"
+                if order_side == OrderSide.SELL:
+                    reduce_only = True
+            else:
+                position_side = "short"
+                if order_side == OrderSide.BUY:
+                    reduce_only = True
+        else:
+            position_side = "long" if order_side == OrderSide.BUY else "short"
+
+        resolved_order_type = OrderType.MARKET if order_type is None else OrderType(order_type)
+        api_order_type = "limit" if (resolved_order_type == OrderType.LIMIT or limit_price is not None) else "market"
+
+        # Stage intent into durable SQLite WAL before network transmission
+        pos_id = (
+            getattr(existing, "_position_id", None)
+            or getattr(existing, "position_id", None)
+            or f"pos-{propr_asset}"
+        )
+
+        account_id = getattr(self.client, "account_id", None) or self._target_account_id or "default"
+        intent = self.journal.stage(
+            account_id=account_id,
+            asset=propr_asset,
+            side=order_side.value.lower(),
+            position_side=position_side,
+            quantity=qty,
+            reduce_only=reduce_only,
+            position_id=pos_id,
+        )
+
+        try:
+            orders = await asyncio.to_thread(
+                self.client.create_order,
+                side=order_side.value.lower(),
+                position_side=position_side,
+                order_type=api_order_type,
+                asset=propr_asset,
+                base=base,
+                quote=quote,
+                quantity=str(qty),
+                price=str(limit_price) if limit_price is not None else None,
+                reduce_only=reduce_only,
+            )
+            if not orders:
+                self.journal.mark(intent.id, "unknown")
+                raise UnknownOutcome("Empty order acknowledgement returned from Propr API")
+            self.journal.mark(intent.id, "accepted")
+        except Exception as exc:
+            if not isinstance(exc, UnknownOutcome):
+                self.journal.mark(intent.id, "unknown")
+                raise UnknownOutcome(f"Order submission outcome ambiguous: {exc}") from exc
+            raise
+        await self._sync_state()
+        return self._parse_order(orders[0])
+
+    async def cancel_order_async(self, order_id: str) -> bool:
+        res = await asyncio.to_thread(self.client.cancel_order, order_id=order_id)
+        await self._sync_state()
+        return res is not None
+
+    async def replace_order_async(
+        self,
+        order_id: str,
+        *,
+        quantity: float | None = None,
+        limit_price: float | None = None,
+        stop_price: float | None = None,
+    ) -> Any:
+        target = None
+        for o in self._pending_orders:
+            if o.order_id == order_id:
+                target = o
+                break
+        if not target:
+            raise ValueError(f"Order {order_id} not found in pending orders")
+        await self.cancel_order_async(order_id)
+        new_qty = quantity if quantity is not None else target.quantity
+        new_price = limit_price if limit_price is not None else target.limit_price
+        return await self.submit_order_async(
+            asset=target.asset,
+            quantity=new_qty,
+            side=target.side,
+            order_type=target.order_type,
+            limit_price=new_price,
+            stop_price=stop_price,
+        )
+
+    async def close_position_async(self, asset: str) -> Any | None:
+        base, quote = (asset.split("/", 1) if "/" in asset else (asset, "USDC"))
+        orders = await asyncio.to_thread(self.client.close_position, base=base, quote=quote)
+        await self._sync_state()
+        if not orders:
+            return None
+        return self._parse_order(orders[0])

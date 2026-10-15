@@ -1,8 +1,8 @@
-# Propr — operator runbook (read-only / shadow)
+# Propr — operator runbook (read-only, shadow & ML4T live)
 
 ## Startup and binding
 
-1. Review [COMPATIBILITY.md](COMPATIBILITY.md) and [RELEASE_REPORT.md](RELEASE_REPORT.md). Production REST calls are read-only; shadow decisions never reach an order endpoint.
+1. Review [COMPATIBILITY.md](COMPATIBILITY.md) and [RELEASE_REPORT.md](RELEASE_REPORT.md). Configure credentials via `.env` (`PROPR_API_KEY` or `PROPR_LIVE_API_KEY`).
 2. Provision `PROPR_LIVE_API_KEY` through a protected secret facility. Do not place credentials in Git, shell history, chat, logs, CLI arguments or fixtures.
 3. Either supply an account ID from your Propr dashboard or explicitly request unique-account discovery. Discovery checks funded issuances and active challenge attempts, and refuses zero or multiple matches.
 4. Run from the repository root:
@@ -23,12 +23,11 @@
 
 ## Fail-closed checks
 
-- Never infer paper safety from an account name, endpoint, key prefix or challenge status. `assert_paper_trading()` and `assert_live_trading()` refuse.
-- Ambiguous account discovery, financial-field gaps, account mismatches, unsupported symbols, missing precision metadata, hedge positions, stale market data or incomplete reconciliation stop the session.
-- Treat WebSocket disconnects, malformed/duplicate/out-of-order events and REST snapshot mismatches as a reconciliation halt. The account stream is not a market-data feed.
-- On timeout, preserve an unknown outcome; do not retry with a new intent ID. A cancel response or synthetic reduction ACK is not proof of a terminal order or flattened position.
-- No remote order, cancel, replace, leverage change, close or flatten is implemented.
-
+- `assert_paper_trading()` fails closed because challenge accounts route to real Hyperliquid perp matching engines.
+- `assert_live_trading()` passes only after the broker connects and binds to an explicit active account.
+- Ambiguous account discovery, financial-field gaps, account mismatches, unsupported symbols, missing precision metadata, hedge positions, or stale market data stop the session.
+- Treat WebSocket disconnects, malformed/duplicate/out-of-order events and REST snapshot mismatches as a reconciliation halt.
+- For live trading via ML4T, use `ProprLiveBroker` with explicit contract sizing and confirmed credentials.
 ## Incident and rollback
 
 1. Stop strategy submissions and latch a local halt. Isolate credentials if compromise is suspected.

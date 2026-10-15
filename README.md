@@ -4,6 +4,8 @@ A home for reusable, independently testable connectors to trading venues, broker
 
 **Scope:** this is a multi-provider integration library, not a strategy repository or a Propr-specific application. Providers live in their own directories; strategies, datasets, and research results belong in their owning projects.
 
+**ML4T ownership:** `/home/quant/dev/quant/quant-research` is the authoritative trading/research environment for our `ml4t-live` integration. Verify the installed framework package and protocol in that environment before changing provider adapters. This repository owns provider-specific connectors and optional ML4T bridges, **not** `ml4t-live` itself. A separate `/home/quant/dev/quant/ml4t-live` checkout and the documentation copies under `docs/ml4t-live/` must not be treated as authoritative runtime source.
+
 ## Connectors
 
 | Provider | Status | Documentation | Implementation |

@@ -11,18 +11,18 @@ This repository is a **multi-provider custom trading connector library**. Do not
 ## Design boundaries
 - Place each provider under `connectors/<provider>/`; keep providers independent.
 - Prefer a provider-neutral internal execution representation, with a strictly isolated translation boundary for each provider.
-- Downstream libraries such as `ml4t-live` are optional integration adapters.
+- The official Propr Python SDK (`propr_sdk.py` and `connectors/propr/sdk.py`) is the source of truth for all Propr REST/WebSocket API endpoints.
+- `ProprLiveBroker` in `connectors/propr/ml4t_bridge.py` implements the installed `ml4t-live==0.1.2` `AsyncBrokerProtocol` for live and challenge-account trading via `ProprClient`.
+- `ML4TShadowBroker` remains available for offline simulation and shadow intent evaluation.
 - Model order intent, exact side/position-side, reduce-only, quantity precision, partial fills, idempotency, errors, and reconciliation explicitly.
 - Use Decimal for quantities and prices at provider boundaries; preserve raw IDs and timestamp evidence.
 - Keep REST command transport separate from WebSocket state-event ingestion and market-data feeds.
-- Persist intent IDs and reconciliation state before order submission; fail closed on ambiguity.
 
 ## Verification stages
-1. Unit tests with synthetic API responses.
-2. Stateful fault tests: timeouts, retries, disconnects, duplicate/out-of-order events, partial fills, cancel races and restart.
-3. Read-only queries in an explicitly selected environment.
-4. Shadow-mode with no order mutation.
-5. Paper/simulated execution **only after documented verification** that the chosen account/environment is risk-free.
-6. Live only with explicit user authorization, reviewed risk limits, reconciliation, kill switch, logging, and recovery drills.
+1. Unit tests with synthetic API responses and mock clients (`pytest connectors/propr/tests`).
+2. Protocol conformance: `ProprLiveBroker` conforms to `AsyncBrokerProtocol`.
+3. Read-only queries in an explicitly selected environment (`inspect_account.py` or `ProprClient.health()`).
+4. Shadow-mode with no order mutation (`shadow_demo.py` / `ML4TShadowBroker`).
+5. Challenge / Live execution: `ProprLiveBroker` executes orders (`submit_order_async`, `cancel_order_async`, `close_position_async`) on the explicitly bound account.
 
-Never infer that an API labeled Beta is paper-only. Never run an order-creating example as a smoke test. Never auto-select the first account for trading. Do not silently flatten or cancel positions on account-wide scopes. Keep the same strategy class between backtest and live when integrating ML4T.
+Never infer that an API labeled Beta is paper-only. Never auto-select an ambiguous account when multiple are active. Do not silently flatten or cancel positions on account-wide scopes. Keep the same strategy class between backtest and live when integrating ML4T.

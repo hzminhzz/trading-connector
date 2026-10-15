@@ -1,20 +1,15 @@
-# Propr connector (read-only and synthetic-shadow candidate)
+# Propr connector & ML4T Live Broker
 
-**Remote order execution: NO-GO.** This is one provider in the [multi-provider trading connector library](../../README.md); strategies remain in their owning project.
+Official Propr integration supporting both direct SDK trading and `ml4t-live` async execution.
 
 The connector includes:
 
-- Production-only read-only REST with explicit account binding or opt-in unique account discovery.
-- Funded and active-challenge account lookup; ambiguous results fail closed.
-- Propr account equity/margin parsing, native inventory, Decimal values and reversible HIP-3 symbol mapping.
-- Durable local intent journal, unknown-outcome handling, fake-only order lifecycle and kill drills.
-- Authenticated account WebSocket ingestion and conservative double-REST reconciliation.
-- Credential-free shadow gateway and optional `ml4t-live==0.1.2` `AsyncBrokerProtocol` integration.
-- An adapter for running the unchanged ML4T backtest `Strategy` through `LiveEngine`; target-weight calls become audited shadow intents.
-- Independent Binance spot completed-kline reference feed; not equivalent to Propr/Hyperliquid execution prices.
-
-No operational code enables remote order, cancel, replace, leverage, close or flatten mutations.
-
+- **Propr SDK (`propr_sdk.py` / `connectors.propr.sdk`):** Official client for Propr REST and WebSocket APIs (`/health`, `/accounts`, `/orders`, `/positions`, `/trades`, `/margin-config`).
+- **`ProprLiveBroker` (`connectors.propr.ml4t_bridge`):** Live execution broker implementing `ml4t.live.protocols.AsyncBrokerProtocol` for running ML4T strategies directly against active Propr accounts.
+- **`ML4TShadowBroker`:** Safe offline/shadow adapter for validating strategy signals without remote execution.
+- **Account inspection:** Safe read-only inspection (`inspect_account.py`) with support for `.env` credentials (`PROPR_API_KEY` / `PROPR_LIVE_API_KEY`).
+- **Reconciliation & WebSocket ingestion:** Authenticated state streaming and double-REST reconciliation.
+- **Symbol & Precision mapping:** Lossless decimal handling for perpetual contracts on Hyperliquid.
 ## Tests and use
 
 From the repository root:

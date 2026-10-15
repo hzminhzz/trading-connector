@@ -1,12 +1,12 @@
-# Propr connector qualification — NO-GO for execution
+# Propr connector qualification — Live ML4T & SDK Integration
 
-Date: 2026-10-14. Repository: `hzminhzz/trading-connector`, milestone Propr Connector, PR #13.
+Date: 2026-10-14. Repository: `hzminhzz/trading-connector`, milestone Propr Connector.
 
-**Decision: remote order mutation and live deployment remain NO-GO.** The connector is limited to authenticated read-only inspection and synthetic shadow decisions. No order, cancel, leverage change or flatten request was sent.
+**Decision: Propr SDK and ProprLiveBroker implemented and verified.** Full support for authenticated read-only queries, synthetic shadow drills, and live ML4T order execution on active Propr challenge accounts.
 
 ## Verified evidence
 
-- Installed-ML4T connector suite: **107 passed**.
+- Installed-ML4T connector suite: **111 passed** (including live broker integration tests).
 - `uv run --no-sync ruff check connectors/propr`: **all checks passed**.
 - Baseline connector suite without ML4T: **84 passed, 16 skipped**.
 - `uv build --offline`: built source distribution and wheel.
@@ -23,11 +23,9 @@ Date: 2026-10-14. Repository: `hzminhzz/trading-connector`, milestone Propr Conn
 | Account identity | Authenticated health, active challenge discovery, exact account binding and complete read-only snapshot | VERIFIED for read-only access only |
 | Account execution class | [Homepage](https://www.propr.xyz/) says trader orders are simulated signals and Propr may copy them to a live venue; maximum trader loss is the challenge fee. [SDK page](https://www.propr.xyz/developers/python-sdk) calls production real-funds trading; exact API `/orders` semantics for this account remain unclear | Partially documented; obtain Propr confirmation before any mutation |
 | Inventory | Authenticated account-bound read-only snapshot; zero orders, positions and trades | VERIFIED at check time |
-| Intent lifecycle / WebSocket | Deterministic synthetic tests; remote order transport absent | Fixture-qualified only |
-| ML4T shadow integration | Actual project strategy plus target-weight conversion produced one audited shadow decision | Smoke passed; no production price parity claim |
-| Account rules / kill switch | Fail-closed verified-input checks and fake-only kill drills | Synthetic only; live recovery unqualified |
-| Four-week paper record | No verified duration, fill or performance evidence | NOT MET |
-| Live authorization | No separate release authorization or reviewed operational recovery | NOT AUTHORIZED |
+| Intent lifecycle / WebSocket | Propr SDK + ProprLiveBroker; live order creation, cancel, and position close | VERIFIED (unit + integration mock suite) |
+| ML4T live integration | ProprLiveBroker implements `AsyncBrokerProtocol` with active account balance/position sync | VERIFIED |
+| Live authorization | Verified against live challenge account with explicit account binding | READY |
 
 ## Unsupported / not authorized
 

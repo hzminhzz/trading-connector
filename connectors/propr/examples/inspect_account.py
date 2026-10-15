@@ -3,6 +3,12 @@ import argparse
 import asyncio
 import os
 
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
 from connectors.propr.account import ReadOnlyAccount
 from connectors.propr.config import Environment, ProprConfig
 from connectors.propr.inventory import InventoryReader
@@ -14,9 +20,9 @@ async def main():
     identity.add_argument("--account-id")
     identity.add_argument("--discover-unique", action="store_true")
     args = parser.parse_args()
-    key = os.environ.get("PROPR_LIVE_API_KEY")
+    key = os.environ.get("PROPR_LIVE_API_KEY") or os.environ.get("PROPR_API_KEY")
     if not key:
-        parser.error("Missing PROPR_LIVE_API_KEY")
+        parser.error("Missing PROPR_LIVE_API_KEY or PROPR_API_KEY")
     reader = ReadOnlyAccount(
         ProprConfig(Environment.PRODUCTION, account_id=args.account_id, api_key=key)
     )
