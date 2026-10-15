@@ -437,6 +437,14 @@ class BybitClient:
                 price=price,
                 params=order_params,
             )
+            order_id = str(o.get("id", ""))
+            if order_id and (o.get("timestamp") is None or o.get("status") is None):
+                try:
+                    hydrated = await self._exchange.fetch_order(order_id, symbol, params={"acknowledged": True})
+                    if isinstance(hydrated, dict) and hydrated.get("id"):
+                        o = hydrated
+                except Exception as hydrate_err:
+                    logger.debug("Failed to hydrate created order %s: %s", order_id, hydrate_err)
             return BybitOrderData(
                 order_id=str(o.get("id", "")),
                 client_order_id=o.get("clientOrderId"),
@@ -444,7 +452,7 @@ class BybitClient:
                 side=str(o.get("side", side)).lower(),
                 order_type=str(o.get("type", order_type)).lower(),
                 price=Decimal(str(o["price"])) if o.get("price") is not None else (Decimal(str(price)) if price is not None else None),
-                quantity=Decimal(str(o.get("amount", amount))),
+                quantity=Decimal(str(o["amount"])) if o.get("amount") is not None else Decimal(str(amount)),
                 filled_quantity=Decimal(str(o.get("filled", 0) or 0)),
                 status=str(o.get("status", "open")).lower(),
                 timestamp=o.get("timestamp"),
@@ -488,6 +496,14 @@ class BybitClient:
                 price=price,
                 params=params or {},
             )
+            order_id_str = str(o.get("id", order_id))
+            if order_id_str and (o.get("timestamp") is None or o.get("status") is None):
+                try:
+                    hydrated = await self._exchange.fetch_order(order_id_str, symbol, params={"acknowledged": True})
+                    if isinstance(hydrated, dict) and hydrated.get("id"):
+                        o = hydrated
+                except Exception as hydrate_err:
+                    logger.debug("Failed to hydrate edited order %s: %s", order_id_str, hydrate_err)
             return BybitOrderData(
                 order_id=str(o.get("id", order_id)),
                 client_order_id=o.get("clientOrderId"),
@@ -495,7 +511,7 @@ class BybitClient:
                 side=str(o.get("side", side)).lower(),
                 order_type=str(o.get("type", order_type)).lower(),
                 price=Decimal(str(o["price"])) if o.get("price") is not None else (Decimal(str(price)) if price is not None else None),
-                quantity=Decimal(str(o.get("amount", amount or 0))),
+                quantity=Decimal(str(o["amount"])) if o.get("amount") is not None else Decimal(str(amount or 0)),
                 filled_quantity=Decimal(str(o.get("filled", 0) or 0)),
                 status=str(o.get("status", "open")).lower(),
                 timestamp=o.get("timestamp"),

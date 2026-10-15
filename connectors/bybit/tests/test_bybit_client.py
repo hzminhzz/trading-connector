@@ -218,3 +218,34 @@ def test_exception_wrapping(client, mock_exchange, ccxt_exc, expected_exc):
             await client.fetch_balance()
 
     asyncio.run(run())
+
+
+def test_create_order_sparse_ack_hydrates_authoritative_fields(exec_client, mock_exchange):
+    mock_exchange.create_order.return_value = {
+        "id": "sparse_123",
+        "clientOrderId": "client_ref",
+        "info": {"orderId": "sparse_123", "orderLinkId": "client_ref"},
+    }
+    mock_exchange.fetch_order = AsyncMock(return_value={
+        "id": "sparse_123",
+        "clientOrderId": "client_ref",
+        "symbol": "BTC/USDT:USDT",
+        "side": "buy",
+        "type": "limit",
+        "price": 50000.0,
+        "amount": 0.001,
+        "filled": 0.0,
+        "status": "open",
+        "timestamp": 1730000000000,
+    })
+
+    async def run():
+        res = await exec_client.create_order("BTC/USDT:USDT", "buy", "limit", 0.001, price=50000.0)
+        assert res.order_id == "sparse_123"
+        assert res.timestamp == 1730000000000
+        assert str(res.quantity) == "0.001"
+        assert str(res.price) == "50000.0"
+        assert res.status == "open"
+        mock_exchange.fetch_order.assert_called_once_with("sparse_123", "BTC/USDT:USDT", params={"acknowledged": True})
+
+    asyncio.run(run())
