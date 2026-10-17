@@ -2,13 +2,11 @@
 """Durable SQLite WAL order intent journal and reconciliation gate for Bybit."""
 from __future__ import annotations
 
-import json
 import secrets
 import sqlite3
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 _CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
 
@@ -87,7 +85,8 @@ class BybitIntentJournal:
                 now_ms = int(time.time() * 1000)
                 for intent_id in staged:
                     self.connection.execute(
-                        "UPDATE intents SET state = 'unknown' WHERE id = ?", (intent_id,)
+                        "UPDATE intents SET state = 'unknown', detail = ? WHERE id = ?",
+                        ("Recovered after interruption while staged; submission outcome is unknown", intent_id),
                     )
                     self.connection.execute(
                         "INSERT INTO audit (at_ms, kind, detail) VALUES (?, ?, ?)",
@@ -163,6 +162,19 @@ class BybitIntentJournal:
                 (now_ms, "submitted", f"Confirmed intent {intent_id} -> order {exchange_order_id}"),
             )
 
+    def mark_rejected(self, intent_id: str, reason: str) -> None:
+        """Marks intent rejected when the venue or local validation refused submission."""
+        now_ms = int(time.time() * 1000)
+        with self.connection:
+            self.connection.execute(
+                "UPDATE intents SET state = 'rejected', detail = ? WHERE id = ?",
+                (reason, intent_id),
+            )
+            self.connection.execute(
+                "INSERT INTO audit (at_ms, kind, detail) VALUES (?, ?, ?)",
+                (now_ms, "rejected", f"Intent {intent_id} rejected: {reason}"),
+            )
+
     def mark_unknown(self, intent_id: str, error: str) -> None:
         """Marks intent unknown when timeout or network drop makes exchange status ambiguous."""
         now_ms = int(time.time() * 1000)
@@ -176,14 +188,22 @@ class BybitIntentJournal:
                 (now_ms, "unknown", f"Intent {intent_id} entered unknown outcome: {error}"),
             )
 
-    def mark_terminal(self, intent_id: str, status: str = "terminal") -> None:
+    def mark_terminal(
+        self, intent_id: str, status: str = "terminal", detail: str | None = None
+    ) -> None:
         """Marks intent resolved (e.g. verified filled or cancelled)."""
         now_ms = int(time.time() * 1000)
         with self.connection:
-            self.connection.execute(
-                "UPDATE intents SET state = ? WHERE id = ?",
-                (status, intent_id),
-            )
+            if detail is None:
+                self.connection.execute(
+                    "UPDATE intents SET state = ? WHERE id = ?",
+                    (status, intent_id),
+                )
+            else:
+                self.connection.execute(
+                    "UPDATE intents SET state = ?, detail = ? WHERE id = ?",
+                    (status, detail, intent_id),
+                )
             self.connection.execute(
                 "INSERT INTO audit (at_ms, kind, detail) VALUES (?, ?, ?)",
                 (now_ms, "terminal", f"Intent {intent_id} marked {status}"),

@@ -9,7 +9,12 @@ from typing import Any
 from connectors.bybit.client import BybitClient
 from connectors.bybit.config import BybitConfig, Environment, Mode
 from connectors.bybit.journal import BybitIntentJournal
-from connectors.bybit.models import BybitOrderData
+from connectors.bybit.models import (
+    BybitInsufficientFundsError,
+    BybitInvalidOrderError,
+    BybitNetworkError,
+    BybitOrderData,
+)
 try:
     from ml4t.backtest.types import Order, OrderSide, OrderStatus, OrderType, Position
     from ml4t.live.protocols import AsyncBrokerProtocol, ExecutionCapability
@@ -184,8 +189,39 @@ class BybitLiveBroker:
                 params=params,
             )
             self.journal.mark_submitted(intent.id, order_data.order_id)
+            if order_data.status.lower() in {"rejected", "cancelled"}:
+                self.journal.mark_terminal(
+                    intent.id,
+                    order_data.status,
+                    detail=f"order {order_data.status} by venue",
+                )
         except Exception as exc:
-            self.journal.mark_unknown(intent.id, str(exc))
+            message = str(exc)
+            rejected = not isinstance(
+                exc, (BybitNetworkError, TimeoutError, ConnectionError)
+            ) and (
+                isinstance(
+                    exc,
+                    (
+                        BybitInsufficientFundsError,
+                        BybitInvalidOrderError,
+                        PermissionError,
+                    ),
+                )
+                or type(exc).__name__ in {
+                    "BadRequest",
+                    "InvalidOrder",
+                    "InsufficientFunds",
+                }
+                or any(
+                    word in message.lower()
+                    for word in ("insufficient", "invalid", "reject")
+                )
+            )
+            if rejected:
+                self.journal.mark_rejected(intent.id, message)
+            else:
+                self.journal.mark_unknown(intent.id, message)
             raise
 
         ml4t_order = self._parse_order(order_data, default_asset=asset)
