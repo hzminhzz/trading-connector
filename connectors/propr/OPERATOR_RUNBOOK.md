@@ -46,6 +46,10 @@ These controls are **not provisioned** for this read-only/shadow candidate:
 - **Kill switch:** current drills are synthetic. No live cancel/reduce/flatten control exists in this connector.
 - **Cancel/flatten:** if an incident occurs with real positions, stop submissions, use the provider UI for the explicitly selected account, then verify orders, positions and fills through read-only reconciliation. Do not claim flattening until the provider state confirms it.
 
+## Completed Free Trial canary
+
+On November 2, 2026, a small user-authorized test sent two real order API requests to a Propr Free Trial `paper` account, not a funded account. Both fills and the final empty position book were verified independently. The source was an observed wallet holding, not a new wallet trade. The one-shot evidence is stored privately; no recurring deployment or general order permission was established. Existing read-only and live-account safeguards are unchanged.
+
 ## Execution gate
 
 Propr's homepage FAQ says challenge trades are simulated signals that may be copied to a live venue and says the one-time challenge fee is the trader's maximum loss. Its [Python SDK documentation](https://www.propr.xyz/developers/python-sdk) labels production as real-funds execution, without clarifying whether API `POST /orders` is signal-only for this account. Do not submit orders or change leverage until Propr confirms the exact API/account semantics in writing. Account failure and loss of the challenge fee remain possible. Live execution additionally requires verified account rules, tested limits/recovery, a four-week record, explicit scoped authorization and a separate release decision.

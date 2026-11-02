@@ -32,6 +32,10 @@ Implemented a separate, local SQLite paper projection into `IntentJournal`'s dat
 
 Read-only Propr GETs for `HYPE`, `ZEC` and `xyz:MU` returned margin configuration fields `configId/accountId/exchange/asset/marginMode/leverage/createdAt/updatedAt`; the leverage-limits endpoint returned nine overrides. These are **not** full verified tradable instrument contracts. Account-specific market IDs/precision/session/cost metadata and price feeds remain unverified and opening risk stays BLOCKED. No connector-owned live order/position mutation, permanent Combo2 paper service, or on-account simulation has been deployed.
 
+## Free Trial execution diagnostic — November 2, 2026
+
+An explicitly authorized one-shot W028 HYPE initial-position test executed a buy and reduce-only sell of 0.20 HYPE on verified Propr Free Trial #JhW9 (`type=paper`). Independent order/trade/position GETs confirmed two fills, zero remaining exposure and net -$0.015654. See the owner-private canary audit under `/home/quant/.local/share/copytrade/reports/combo2-real-free-trial-canary-20261102/`. This tests a real Propr API order, but is not a newly observed wallet change or full Combo 2 follower sizing. General and unattended execution gates remain closed.
+
 ## Release gates
 
 | Gate | Evidence required | Current decision |
