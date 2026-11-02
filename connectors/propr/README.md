@@ -36,6 +36,14 @@ A user-authorized one-shot test on verified Propr Free Trial account #JhW9 (`typ
 
 The source was an actual W028 HYPE holding snapshot, **not a newly observed wallet trade**. It was an execution diagnostic rather than faithful Combo 2 follower sizing. The Free Trial test does not authorize any future automated or funded-account orders. The existing normal Propr read-only transport and paper-ledger projection remain unchanged.
 
+## Bounded genuine-delta Free Trial canary (opt-in, no unattended service)
+
+`connectors.propr.examples.free_trial_delta_canary` imports only the **read-only, verified** `copytrade-pm` two-generation signed-position detector. Default execution is `NO_TRADE_READ_ONLY`; actual trial orders require the explicit `--authorize-free-trial-delta-canary` flag and the exact selected `--signal-id`. The connector checks that T+300 seconds has elapsed without expiring the 900-second post-due window. It independently re-queries all relevant Hyperliquid parent/subaccounts, verifies their frozen address hashes and unified modes, and rejects reduced/reversed positions.
+
+**Diagnostic limits:** exact Propr Free Trial `#JhW9` account, type `paper`, HYPE on the default DEX only, only opening/increasing long or short exposures; target $20, hard maximum $25 reference notional, 0.20 HYPE maximum, one opening at a time and **one claimed attempt per UTC day**. The claim database uses a fixed, private home-directory path and is written before the first POST. The local IntentJournal also stages every order before sending. Unknown acknowledgements halt; any observed partial opening is reduced only by the independently reported filled quantity. No automatic remote retry, scheduled order process, wallet-equity sizing or production deployment is authorized.
+
+Research CLI: `python -m copytrade_pm.pm_combo2_signed_delta --earlier PRIVATE_SWEEP_A --later PRIVATE_SWEEP_B`. The canary command requires both immutable generations, the exact signal ID, the explicit account, owner-private audit directory, credential file and research identity root. Do not enable the authorization flag for synthetic fixture signals; only a directly observed fresh source change qualifies for another real account test. See copytrade-pm Issue #22. Passing fake-client/transport tests is **engineering verification**, not evidence of a new live wallet signal.
+
 ## Tests and use
 
 From the repository root:
