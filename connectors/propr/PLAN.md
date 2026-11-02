@@ -26,6 +26,12 @@ Official Propr materials are now clearer about the platform model: the homepage 
 - Account WebSocket events are not market data. Fresh independent prices and Propr execution prices are not proven equivalent.
 - Synthetic acknowledgements do not establish fill, cancellation or flattening.
 
+## Combo 2 paper journal continuation (copytrade-pm Issue #22)
+
+Implemented a separate, local SQLite paper projection into `IntentJournal`'s database. Paper decision/fill rows live only in dedicated `combo2_paper_*` tables; the existing broker `intents` and `audit` tables and read-only actual account snapshots are not paper accounting authorities. The optional CLI imports only replay-verified `copytrade-pm` events and does not open a Propr or Hyperliquid network client. Fixture tests cover exactly-once projection, partial transaction rollback, corrupt input rejection and a socket spy showing zero remote calls.
+
+Read-only Propr GETs for `HYPE`, `ZEC` and `xyz:MU` returned margin configuration fields `configId/accountId/exchange/asset/marginMode/leverage/createdAt/updatedAt`; the leverage-limits endpoint returned nine overrides. These are **not** full verified tradable instrument contracts. Account-specific market IDs/precision/session/cost metadata and price feeds remain unverified and opening risk stays BLOCKED. No connector-owned live order/position mutation, permanent Combo2 paper service, or on-account simulation has been deployed.
+
 ## Release gates
 
 | Gate | Evidence required | Current decision |

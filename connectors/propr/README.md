@@ -10,6 +10,14 @@ The connector includes:
 - **Account inspection:** Safe read-only inspection (`inspect_account.py`) with support for `.env` credentials (`PROPR_API_KEY` / `PROPR_LIVE_API_KEY`).
 - **Reconciliation & WebSocket ingestion:** Authenticated state streaming and double-REST reconciliation.
 - **Symbol & Precision mapping:** Lossless decimal handling for perpetual contracts on Hyperliquid.
+## Combo 2 paper-only, no-broker-intent projection
+
+`connectors.propr.combo2_paper_projection.Combo2PaperProjection` is a **local-only** adapter for the independently verified `copytrade-pm` paper event chain. It requires a pre-existing private SQLite `IntentJournal` and writes only separate `combo2_paper_decisions` and `combo2_paper_actions` tables. It does **not** stage real broker orders, mark an actual order filled or affect the live Propr account. Exact repeated projection is idempotent; a conflicting replay or a partially committed transaction fails atomically.
+
+The `connectors.propr.examples.project_combo2_paper` CLI imports the optional installed `copytrade_pm` module, verifies the immutable manifest and each full journal post-state, then projects locally into the SQLite journal. This command imports no Propr SDK/REST client and does no networking. Actual Propr account health remains in the separate read-only `ReadOnlyAccount` API.
+
+**Release gate:** this is not a deployed paper tracker. Propr leverage-limit GET and account margin-configuration GET returned records for selected symbols, but account-specific instrument/DEX ID, lot/tick/minimum/session, independent executable price/fees and challenge rules remain **unattested**. Do not guess them from display symbols. All live order mutations remain unauthorized. See copytrade-pm Issue #22.
+
 ## Tests and use
 
 From the repository root:
