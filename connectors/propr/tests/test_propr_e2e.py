@@ -7,17 +7,26 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
-from ml4t.backtest.strategy import Strategy
-from ml4t.backtest.types import OrderSide, OrderType
-from ml4t.live.engine import LiveEngine
-from ml4t.live.safety import LiveRiskConfig, SafeBroker
-from ml4t.specs.lifecycle import (
-    BarPayload,
-    EventCompletion,
-    LifecycleVersion,
-    MarketEvent,
-    MarketEventKind,
-)
+
+# ML4T is an optional integration dependency. The default connector CI must
+# collect its no-network tests without installing an external ML4T package.
+# In an installed ML4T environment these E2E tests still execute normally.
+try:
+    from ml4t.backtest.strategy import Strategy
+    from ml4t.backtest.types import OrderSide, OrderType
+    from ml4t.live.engine import LiveEngine
+    from ml4t.live.safety import LiveRiskConfig, SafeBroker
+    from ml4t.specs.lifecycle import (
+        BarPayload,
+        EventCompletion,
+        LifecycleVersion,
+        MarketEvent,
+        MarketEventKind,
+    )
+except ModuleNotFoundError as exc:
+    if exc.name != "ml4t":
+        raise
+    pytest.skip("ML4T optional integration not installed", allow_module_level=True)
 
 from connectors.propr.feed import ValidatedExternalFeed
 from connectors.propr.ml4t_bridge import ProprLiveBroker
