@@ -3,6 +3,7 @@
 Never routes orders. Hyperliquid bar prices are not Bybit execution prices.
 The frozen universe is a point-in-time research input, not a venue allowlist.
 """
+
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
@@ -14,11 +15,13 @@ from typing import Any
 
 SCHEMA = "hyperliquid_chd_76_universe_v1"
 REGISTRY = Path(__file__).with_name("hyperliquid_76.json")
-VALID_SOURCE_STATUSES = frozenset({
-    "fetched_from_chd_trades",
-    "rebuilt_from_local_chd_trades",
-    "fetched_from_chd_candles",
-})
+VALID_SOURCE_STATUSES = frozenset(
+    {
+        "fetched_from_chd_trades",
+        "rebuilt_from_local_chd_trades",
+        "fetched_from_chd_candles",
+    }
+)
 
 
 def _decimal(value: Any) -> Decimal:
@@ -52,12 +55,10 @@ def load_registry(path: Path = REGISTRY) -> tuple[str, ...]:
         or sum(x.startswith("xyz:") for x in symbols if isinstance(x, str)) != 26
         or any(
             not isinstance(x, str)
-            or x.startswith("xyz:") and (
-                not x[4:].isascii() or not x[4:].isalnum() or x[4:] != x[4:].upper()
-            )
-            or not x.startswith("xyz:") and (
-                not x.isascii() or not x.isalnum() or x != x.upper()
-            )
+            or x.startswith("xyz:")
+            and (not x[4:].isascii() or not x[4:].isalnum() or x[4:] != x[4:].upper())
+            or not x.startswith("xyz:")
+            and (not x.isascii() or not x.isalnum() or x != x.upper())
             for x in symbols
         )
     ):
@@ -79,7 +80,11 @@ def source_store(store_root: Path, symbol: str) -> Path:
     source_instrument(symbol)
     root = Path(store_root)
     if symbol.startswith("xyz:"):
-        return root / "crypto_futures_ohlcv_1m_HYPERLIQUID_XYZ_PERP" / ("symbol=" + symbol[4:])
+        return (
+            root
+            / "crypto_futures_ohlcv_1m_HYPERLIQUID_XYZ_PERP"
+            / ("symbol=" + symbol[4:])
+        )
     return root / ("crypto_futures_ohlcv_1m_HYPERLIQUID_" + symbol + "_PERP")
 
 
@@ -161,14 +166,20 @@ def read_historical_minute(
     row = rows.row(0, named=True)
     if row["symbol"] != symbol.removeprefix("xyz:"):
         raise ValueError("HYPERLIQUID_SYMBOL_MISMATCH")
-    o, h, low, c, v = (_decimal(row[k]) for k in ("open", "high", "low", "close", "volume"))
+    o, h, low, c, v = (
+        _decimal(row[k]) for k in ("open", "high", "low", "close", "volume")
+    )
     if o <= 0 or low <= 0 or not low <= o <= h or not low <= c <= h or v < 0:
         raise ValueError("INVALID_HYPERLIQUID_BAR")
     return HistoricalMinute(
         source_instrument=source_instrument(symbol),
         bar_open_at=at.isoformat(),
         observed_at=None,  # Retrospective Parquet is never a first-known live timestamp
-        open=str(o), high=str(h), low=str(low), close=str(c), volume=str(v),
+        open=str(o),
+        high=str(h),
+        low=str(low),
+        close=str(c),
+        volume=str(v),
         provenance_status=status,
     )
 
@@ -221,16 +232,18 @@ def match_bybit_market(symbol: str, markets: dict[str, Any]) -> dict[str, Any]:
     except (KeyError, TypeError, ValueError):
         result["reason"] = "BYBIT_MINIMUM_OR_PRECISION_UNATTESTED"
         return result
-    result.update({
-        "market": bybit,
-        "native_id": market["id"],
-        "mapping": "MATCHED_RESEARCH",
-        "reason": None,
-        "qty_step": str(qty_step),
-        "min_qty": str(min_qty),
-        "min_notional": str(min_notional),
-        "tick_size": str(tick_size),
-    })
+    result.update(
+        {
+            "market": bybit,
+            "native_id": market["id"],
+            "mapping": "MATCHED_RESEARCH",
+            "reason": None,
+            "qty_step": str(qty_step),
+            "min_qty": str(min_qty),
+            "min_notional": str(min_notional),
+            "tick_size": str(tick_size),
+        }
+    )
     return result
 
 
@@ -252,74 +265,184 @@ def coverage(markets: dict[str, Any], store_root: Path | None = None) -> dict[st
 
 
 def shadow_target_preview(
-    targets: dict[str, Any],
+    pm_report: dict[str, Any],
     markets: dict[str, Any],
     bybit_marks: dict[str, Any],
+    source_marks: dict[str, Any],
     *,
     gross_cap_usd: Decimal,
+    coin_gross_cap_usd: Decimal,
 ) -> dict[str, Any]:
-    """Translate *already sized* PM notionals into non-executable Bybit previews.
+    """Validate PM's *allowed per-manager quantities* before a Bybit shadow target.
 
-    Targets keyed by exact Hyperliquid instrument. No wallet weights, NAV, or
-    source timestamps are invented. Price inputs MUST be Bybit marks, not HL bars.
+    This is a target-state preview, NOT a broker order/delta. PM alone owns
+    leader-equity sizing and the pre-net coin/portfolio clamps. The source
+    marks must be the same frozen marks used by that PM rebalance: they
+    convert the already-allowed source quantities back to USD notionals.
+    Bybit reference marks then convert net USD to Bybit target quantities.
+    No leader NAV, order inventory or execution is inferred here.
     """
     cap = _decimal(gross_cap_usd)
-    if cap <= 0 or not isinstance(targets, dict):
+    coin_cap = _decimal(coin_gross_cap_usd)
+    if cap <= 0 or coin_cap <= 0:
+        raise ValueError("INVALID_PAPER_GROSS_CAP")
+    if not all(
+        isinstance(x, dict) for x in (pm_report, markets, bybit_marks, source_marks)
+    ):
         raise ValueError("INVALID_PAPER_PORTFOLIO")
-    if not isinstance(bybit_marks, dict):
-        raise ValueError("BYBIT_MARKS_REQUIRED")
-    if len(targets) > 76:
-        raise ValueError("UNBOUNDED_PM_PORTFOLIO")
-    candidates = []
-    skipped = []
-    gross = Decimal(0)
-    for instrument, signed in sorted(targets.items()):
-        hits = [sym for sym in load_registry() if source_instrument(sym) == instrument]
-        if len(hits) != 1:
-            skipped.append({"source_instrument": instrument, "reason": "NOT_REGISTERED"})
+    if (
+        pm_report.get("hypothetical") is not True
+        or pm_report.get("authorized_for_live") is not False
+        or not isinstance(pm_report.get("allowed"), dict)
+        or set(pm_report["allowed"]) != {"W028", "CA-008", "W015"}
+        or any(not isinstance(x, dict) for x in pm_report["allowed"].values())
+    ):
+        raise ValueError("VERIFIED_PM_MANAGER_ALLOWED_BOOK_REQUIRED")
+
+    # The PM reports quantities per independent manager. A net-only input
+    # cannot prove gross caps or retain attribution and is rejected.
+    instrument_to_symbol = {source_instrument(s): s for s in load_registry()}
+    contributions: dict[str, dict[str, Decimal]] = {}
+    invalid = []
+    for manager in sorted(pm_report["allowed"]):
+        for instrument, raw_quantity in pm_report["allowed"][manager].items():
+            if not isinstance(instrument, str):
+                raise ValueError("INVALID_SOURCE_INSTRUMENT")
+            quantity = _decimal(raw_quantity)
+            if quantity == 0:
+                continue
+            if instrument not in instrument_to_symbol:
+                invalid.append(
+                    {"source_instrument": instrument, "reason": "NOT_REGISTERED"}
+                )
+                continue
+            price = _decimal(source_marks.get(instrument))
+            if price <= 0:
+                raise ValueError("INVALID_OR_MISSING_PM_SOURCE_MARK")
+            contributions.setdefault(instrument, {})[manager] = quantity * price
+
+    coin_gross = {
+        instrument: sum((abs(x) for x in book.values()), Decimal(0))
+        for instrument, book in contributions.items()
+    }
+    gross = sum(coin_gross.values(), Decimal(0))
+    base = {
+        "gross_pre_net_source_usd": str(gross),
+        "gross_cap_usd": str(cap),
+        "coin_gross_cap_usd": str(coin_cap),
+        "source_coin_gross_usd": {k: str(v) for k, v in sorted(coin_gross.items())},
+        "source_manager_gross_usd": {
+            manager: str(
+                sum(
+                    (
+                        abs(book.get(manager, Decimal(0)))
+                        for book in contributions.values()
+                    ),
+                    Decimal(0),
+                )
+            )
+            for manager in sorted(pm_report["allowed"])
+        },
+        "targets": [],
+        "execution_authorized": False,
+        "order_deltas_computed": False,
+        "bybit_challenge_account_attested": False,
+        "source": "COPYTRADE_PM_ALLOWED_MANAGER_BOOK_NOT_BROKER_ORDERS",
+    }
+    # Cannot release an actionable subset from a frozen/partial source book.
+    if (
+        pm_report.get("status") != "ACTIVE_PAPER"
+        or pm_report.get("risk_reason") is not None
+    ):
+        return {**base, "status": "BLOCKED_PM_RISK", "skipped": invalid}
+    if (
+        pm_report.get("partial_book") is not False
+        or pm_report.get("skipped_unlisted") != []
+    ):
+        return {**base, "status": "BLOCKED_PM_PARTIAL_BOOK", "skipped": invalid}
+    # PRE-NET. Opposing manager books cannot bypass either gross cap.
+    if gross > cap or any(value > coin_cap for value in coin_gross.values()):
+        return {**base, "status": "BLOCKED_PRE_NET_GROSS_CAP", "skipped": invalid}
+
+    targets = []
+    skipped = list(invalid)
+    bybit_target_gross = Decimal(0)
+    for instrument, book in sorted(contributions.items()):
+        if instrument not in instrument_to_symbol:
             continue
-        symbol = hits[0]
-        amount = _decimal(signed)
+        net = sum(book.values(), Decimal(0))
+        symbol = instrument_to_symbol[instrument]
         binding = match_bybit_market(symbol, markets)
         if binding["mapping"] != "MATCHED_RESEARCH":
-            skipped.append({"source_instrument": instrument, "reason": binding["reason"]})
+            skipped.append(
+                {"source_instrument": instrument, "reason": binding["reason"]}
+            )
             continue
-        if amount == 0:
+        market = binding["market"]
+        if net == 0:
+            # Zero external exposure is an explicit FLAT target, not an
+            # instruction to skip a potential prior Bybit position close.
+            # Without reconciled broker inventory no order delta is possible.
+            targets.append(
+                {
+                    "kind": "SHADOW_TARGET_POSITION_NOT_ORDER",
+                    "source_instrument": instrument,
+                    "bybit_market": market,
+                    "source_manager_notionals_usd": {
+                        k: str(v) for k, v in sorted(book.items())
+                    },
+                    "source_net_notional_usd": "0",
+                    "target_side": "flat",
+                    "target_quantity": "0",
+                    "bybit_reference_price": None,
+                    "bybit_target_notional_usd": "0",
+                    "notional_tracking_error_usd": "0",
+                    "hypothetical": True,
+                }
+            )
             continue
-        bybit_price = _decimal(bybit_marks.get(binding["market"]))
+        if market not in bybit_marks:
+            raise ValueError("MISSING_BYBIT_REFERENCE_PRICE")
+        bybit_price = _decimal(bybit_marks[market])
         if bybit_price <= 0:
             raise ValueError("INVALID_BYBIT_REFERENCE_PRICE")
-        qty_step = _decimal(binding["qty_step"])
-        qty = ((abs(amount) / bybit_price) / qty_step).to_integral_value(rounding=ROUND_DOWN) * qty_step
-        if qty < _decimal(binding["min_qty"]) or qty * bybit_price < _decimal(binding["min_notional"]):
-            skipped.append({"source_instrument": instrument, "reason": "BYBIT_MIN_ORDER_NOT_MET"})
+        step = _decimal(binding["qty_step"])
+        quantity = ((abs(net) / bybit_price) / step).to_integral_value(
+            rounding=ROUND_DOWN
+        ) * step
+        if quantity < _decimal(binding["min_qty"]) or quantity * bybit_price < _decimal(
+            binding["min_notional"]
+        ):
+            skipped.append(
+                {"source_instrument": instrument, "reason": "BYBIT_MIN_ORDER_NOT_MET"}
+            )
             continue
-        gross += qty * bybit_price
-        candidates.append({
-            "source_instrument": instrument,
-            "bybit_market": binding["market"],
-            "signed_notional_usd": str(amount),
-            "side": "buy" if amount > 0 else "sell",
-            "quantity": str(qty),
-            "bybit_reference_price": str(bybit_price),
-            "hypothetical": True,
-        })
-    if gross > cap:
-        return {
-            "status": "BLOCKED_GROSS_CAP",
-            "total_gross_usd": str(gross),
-            "gross_cap_usd": str(cap),
-            "actions": [],
-            "skipped": skipped,
-            "execution_authorized": False,
-        }
-    return {
-        "status": "SHADOW_ONLY",
-        "total_gross_usd": str(gross),
-        "gross_cap_usd": str(cap),
-        "actions": candidates,
+        signed_bybit_notional = quantity * bybit_price * (1 if net > 0 else -1)
+        bybit_target_gross += abs(signed_bybit_notional)
+        targets.append(
+            {
+                "kind": "SHADOW_TARGET_POSITION_NOT_ORDER",
+                "source_instrument": instrument,
+                "bybit_market": market,
+                "source_manager_notionals_usd": {
+                    k: str(v) for k, v in sorted(book.items())
+                },
+                "source_net_notional_usd": str(net),
+                "target_side": "long" if net > 0 else "short",
+                "target_quantity": str(quantity),
+                "bybit_reference_price": str(bybit_price),
+                "bybit_target_notional_usd": str(signed_bybit_notional),
+                "notional_tracking_error_usd": str(net - signed_bybit_notional),
+                "hypothetical": True,
+            }
+        )
+    result = {
+        **base,
+        "bybit_target_gross_usd": str(bybit_target_gross),
         "skipped": skipped,
-        "execution_authorized": False,
-        "bybit_challenge_account_attested": False,
-        "source": "COPYTRADE_PM_RESEARCH_TARGETS_NOT_BROKER_ORDERS",
     }
+    if skipped:
+        # Do not silently drop a manager's unsupported or sub-minimum leg
+        # while suggesting the remaining target can represent the portfolio.
+        return {**result, "status": "BLOCKED_INCOMPLETE_BYBIT_BOOK"}
+    return {**result, "status": "SHADOW_ONLY", "targets": targets}
