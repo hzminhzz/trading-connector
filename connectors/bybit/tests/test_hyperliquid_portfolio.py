@@ -218,6 +218,36 @@ def test_opposing_managers_pre_net_gross_even_when_net_zero():
     assert too_small_cap["targets"] == []
 
 
+def test_explicit_zero_manager_book_emits_flat_target_without_price():
+    # Regression: skipping zero quantities hid a target-state flat/close.
+    instrument = source_instrument("BTC")
+    plan = preview(
+        pm_report({"W028": {instrument: "0"}, "W015": {instrument: "0"}}),
+        marks={},
+        bybit_prices={},
+    )
+    assert plan["status"] == "SHADOW_ONLY"
+    assert plan["gross_pre_net_source_usd"] == "0"
+    assert len(plan["targets"]) == 1
+    assert plan["targets"][0]["target_side"] == "flat"
+    assert plan["targets"][0]["target_quantity"] == "0"
+    assert plan["targets"][0]["source_manager_notionals_usd"] == {
+        "W015": "0",
+        "W028": "0",
+    }
+    assert plan["order_deltas_computed"] is False
+
+
+def test_explicit_zero_unknown_instrument_not_silently_skipped():
+    invalid = "hyperliquid/mainnet:perp:default/NONEXISTENT"
+    plan = preview(pm_report({"W028": {invalid: "0"}}), marks={}, bybit_prices={})
+    assert plan["status"] == "BLOCKED_INCOMPLETE_BYBIT_BOOK"
+    assert plan["targets"] == []
+    assert plan["skipped"] == [
+        {"source_instrument": invalid, "reason": "NOT_REGISTERED"}
+    ]
+
+
 def test_manager_attribution_preserved_before_net_and_bybit_rounding():
     report = pm_report(
         {

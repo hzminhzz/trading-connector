@@ -309,12 +309,16 @@ def shadow_target_preview(
             if not isinstance(instrument, str):
                 raise ValueError("INVALID_SOURCE_INSTRUMENT")
             quantity = _decimal(raw_quantity)
-            if quantity == 0:
-                continue
             if instrument not in instrument_to_symbol:
                 invalid.append(
                     {"source_instrument": instrument, "reason": "NOT_REGISTERED"}
                 )
+                continue
+            if quantity == 0:
+                # An explicit manager flat must remain in the target state:
+                # omitting it could conceal a required close of an old position.
+                # No market mark is needed to value exactly zero base units.
+                contributions.setdefault(instrument, {})[manager] = Decimal(0)
                 continue
             price = _decimal(source_marks.get(instrument))
             if price <= 0:

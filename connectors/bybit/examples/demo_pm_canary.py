@@ -224,22 +224,44 @@ async def fetch_trade_fills(
     """Independent Bybit V5 execution list, NOT a create-order acknowledgement."""
     if not order_id:
         raise ValueError("ORDER_ID_REQUIRED")
-    response = await client.exchange.private_get_v5_execution_list(
-        {"category": "linear", "symbol": native_id, "orderId": order_id, "limit": 50}
-    )
-    result = client._v5_result(response, "demo_execution_list")
-    rows = result.get("list")
-    if not isinstance(rows, list):
-        raise RuntimeError("DEMO_EXECUTION_LIST_UNAVAILABLE")
-    matches = [x for x in rows if isinstance(x, dict) and x.get("orderId") == order_id]
+    params = {
+        "category": "linear",
+        "symbol": native_id,
+        "orderId": order_id,
+        "limit": 50,
+    }
+    seen_cursors: set[str] = set()
+    matches: list[dict[str, Any]] = []
+    pages = 0
+    for pages in range(1, 26):
+        response = await client.exchange.private_get_v5_execution_list(dict(params))
+        result = client._v5_result(response, "demo_execution_list")
+        rows = result.get("list")
+        if not isinstance(rows, list) or not all(isinstance(x, dict) for x in rows):
+            raise RuntimeError("DEMO_EXECUTION_LIST_UNAVAILABLE")
+        matches.extend(row for row in rows if row.get("orderId") == order_id)
+        cursor = result.get("nextPageCursor") or ""
+        if not cursor:
+            break
+        if not isinstance(cursor, str) or cursor in seen_cursors:
+            raise RuntimeError("DEMO_EXECUTION_CURSOR_INVALID")
+        seen_cursors.add(cursor)
+        params["cursor"] = cursor
+    else:
+        # Do not certify a fill from a truncated or looping REST response.
+        raise RuntimeError("DEMO_EXECUTION_LIST_INCOMPLETE")
+    ids = [row.get("execId") for row in matches]
+    if any(not isinstance(x, str) or not x for x in ids) or len(ids) != len(set(ids)):
+        raise RuntimeError("DEMO_EXECUTION_IDS_MISSING_OR_DUPLICATED")
     filled = sum((decimal(row.get("execQty")) for row in matches), Decimal(0))
     if any(decimal(row.get("execPrice")) <= 0 for row in matches):
         raise RuntimeError("DEMO_EXECUTION_PRICE_INVALID")
     return {
         "order_id": order_id,
         "execution_rows": len(matches),
+        "pages_scanned": pages,
         "filled_quantity": str(filled),
-        "execution_ids_present": all(bool(x.get("execId")) for x in matches),
+        "execution_ids_present": True,
     }
 
 

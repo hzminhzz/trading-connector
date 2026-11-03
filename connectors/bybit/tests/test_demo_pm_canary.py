@@ -191,6 +191,118 @@ def test_independent_fill_list_ignores_unrelated_order_ids():
     assert result["filled_quantity"] == "10"
 
 
+@pytest.mark.parametrize(
+    ("extra", "expected"),
+    [
+        ({"nextPageCursor": "another-page"}, "CURSOR_INVALID"),
+        (
+            {
+                "list": [
+                    {
+                        "orderId": "expected",
+                        "execId": "same",
+                        "execQty": "1",
+                        "execPrice": "1.25",
+                    },
+                    {
+                        "orderId": "expected",
+                        "execId": "same",
+                        "execQty": "1",
+                        "execPrice": "1.25",
+                    },
+                ]
+            },
+            "IDS_MISSING_OR_DUPLICATED",
+        ),
+        (
+            {
+                "list": [
+                    {
+                        "orderId": "expected",
+                        "execId": "",
+                        "execQty": "1",
+                        "execPrice": "1.25",
+                    },
+                ]
+            },
+            "IDS_MISSING_OR_DUPLICATED",
+        ),
+    ],
+)
+def test_independent_execution_rejects_truncated_or_duplicate_evidence(extra, expected):
+    client = MagicMock()
+    client.exchange.private_get_v5_execution_list = AsyncMock(
+        return_value={
+            "retCode": 0,
+            "result": {
+                "list": [
+                    {
+                        "orderId": "expected",
+                        "execId": "one",
+                        "execQty": "2",
+                        "execPrice": "1.25",
+                    }
+                ],
+                **extra,
+            },
+        }
+    )
+    client._v5_result = lambda value, _: value["result"]
+    with pytest.raises(RuntimeError, match=expected):
+        asyncio.run(fetch_trade_fills(client, "XRPUSDT", "expected"))
+
+
+def test_independent_execution_reads_all_pages_before_certifying_fill():
+    client = MagicMock()
+    client.exchange.private_get_v5_execution_list = AsyncMock(
+        side_effect=[
+            {
+                "retCode": 0,
+                "result": {
+                    "list": [
+                        {
+                            "orderId": "expected",
+                            "execId": "fill-1",
+                            "execQty": "5",
+                            "execPrice": "1.25",
+                        }
+                    ],
+                    "nextPageCursor": "next",
+                },
+            },
+            {
+                "retCode": 0,
+                "result": {
+                    "list": [
+                        {
+                            "orderId": "unrelated",
+                            "execId": "another",
+                            "execQty": "100",
+                            "execPrice": "1.25",
+                        },
+                        {
+                            "orderId": "expected",
+                            "execId": "fill-2",
+                            "execQty": "7",
+                            "execPrice": "1.26",
+                        },
+                    ],
+                    "nextPageCursor": "",
+                },
+            },
+        ]
+    )
+    client._v5_result = lambda value, _: value["result"]
+    result = asyncio.run(fetch_trade_fills(client, "XRPUSDT", "expected"))
+    assert result["execution_rows"] == 2
+    assert result["pages_scanned"] == 2
+    assert result["filled_quantity"] == "12"
+    requests = client.exchange.private_get_v5_execution_list.call_args_list
+    assert requests[0].args[0]["orderId"] == "expected"
+    assert requests[0].args[0].get("cursor") is None
+    assert requests[1].args[0]["cursor"] == "next"
+
+
 def test_intent_journal_only_settles_after_exact_independent_execution(tmp_path):
     journal = BybitIntentJournal(tmp_path / "intent.sqlite")
     record = journal.stage(
