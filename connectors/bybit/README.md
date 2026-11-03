@@ -54,6 +54,27 @@ V5 fields fail closed. Demo private REST is `api-demo.bybit.com`; the public
 market feed is separate Mainnet. Testnet cannot substitute for Demo in this
 operator command.
 
+### Real Bybit Demo PM sizing-to-fill canary (explicit opt-in)
+
+A separately gated one-shot diagnostic now runs the real Combo 2 `copytrade-pm`
+sizing engine on a **synthetic source fixture**, maps a tightly capped XRP
+target through the Bybit connector, opens a real **Demo-only** market position,
+then submits one reduce-only close. Both fills are independently reconciled
+against Bybit V5 executions; an additional read-only session verifies the
+account is flat and settles the durable SQLite intent journal.
+
+- Default `python -m connectors.bybit.examples.demo_pm_canary`: read-only preflight.
+- Explicit `python -m connectors.bybit.examples.demo_pm_canary --execute`:
+  single bounded Demo order-and-close, hard $25 max, single-attempt daily claim.
+- `--verify-audit PRIVATE_RUN_DIRECTORY`: fresh **read-only network**
+  verification, local intent settlement; no new orders.
+
+The dedicated Demo account credentials and `BYBIT_MODE=read_only` file are
+not changed. This proves the **Demo execution path**, not a genuine wallet
+first-known signal, a 300-second prospective wait, or challenge permissions.
+See [the measured Demo E2E evidence and operator runbook](DEMO-PM-E2E.md)
+and [the Hyperliquid 76-market bridge](HYPERLIQUID-76.md).
+
 ### Inspection (Read-Only)
 ```bash
 python -m connectors.bybit.examples.inspect_account
