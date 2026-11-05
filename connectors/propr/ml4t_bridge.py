@@ -545,6 +545,7 @@ class ProprLiveBroker:
                 price=str(limit_price) if limit_price is not None else None,
                 trigger_price=str(stop_price) if stop_price is not None else None,
                 reduce_only=reduce_only,
+                client_intent_id=intent.id,
             )
             if not orders:
                 self.journal.mark(intent.id, "unknown")
@@ -578,17 +579,9 @@ class ProprLiveBroker:
                 break
         if not target:
             raise ValueError(f"Order {order_id} not found in pending orders")
-        await self.cancel_order_async(order_id)
-        new_qty = quantity if quantity is not None else target.quantity
-        new_price = limit_price if limit_price is not None else target.limit_price
-        return await self.submit_order_async(
-            asset=target.asset,
-            quantity=new_qty,
-            side=target.side,
-            order_type=target.order_type,
-            limit_price=new_price,
-            stop_price=stop_price,
-        )
+        if not await self.cancel_order_async(order_id):
+            raise UnknownOutcome("Cancellation outcome unknown; replacement prohibited")
+        raise UnknownOutcome("Cancel/fill cutoff unverified; replacement requires reconciliation")
 
     async def close_position_async(self, asset: str) -> Any | None:
         base, quote = (asset.split("/", 1) if "/" in asset else (asset, "USDC"))

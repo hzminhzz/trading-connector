@@ -240,12 +240,11 @@ def test_propr_live_broker_replace_order():
     async def run():
         await broker.connect()
         # Replace existing ord_1
-        replaced = await broker.replace_order_async(
-            "ord_1",
-            quantity=0.03,
-            limit_price=87500.0,
-        )
-        assert replaced.quantity == 0.03
-        assert replaced.limit_price == 87500.0
+        from connectors.propr.state import UnknownOutcome
+        with pytest.raises(UnknownOutcome, match="cutoff unverified"):
+            await broker.replace_order_async(
+                "ord_1", quantity=0.03, limit_price=87500.0,
+            )
+        assert not any(call[0] == "create_order" for call in client.calls)
 
     asyncio.run(run())
