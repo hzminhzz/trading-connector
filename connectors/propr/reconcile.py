@@ -27,6 +27,8 @@ class AccountReconciler:
         self.stale_after = stale_after
         self.connected = False
         self.ready = False
+        self.rest_consistent = False
+        self.history_cutoff = None  # Provider supplies no coherent replay/snapshot cursor.
         self.last_heartbeat = None
         self.snapshot = None
         self.seen = set()
@@ -39,6 +41,7 @@ class AccountReconciler:
         self.revision += 1
         self.connected = False
         self.ready = False
+        self.rest_consistent = False
         self.audit.append(AuditEvent("connection", "disconnected; openings halted"))
         self.journal.audit("account_connection", "disconnected")
 
@@ -46,6 +49,7 @@ class AccountReconciler:
         self.revision += 1
         self.connected = True
         self.ready = False
+        self.rest_consistent = False
         self.last_heartbeat = self.clock()
         self.audit.append(AuditEvent("connection", "connected; snapshot required"))
         self.journal.audit("account_connection", "connected; unverified")
@@ -71,12 +75,14 @@ class AccountReconciler:
         self.revision += 1
         # Every event invalidates prior snapshots until reconciliation.
         self.ready = False
+        self.rest_consistent = False
         self.audit.append(AuditEvent("event", f"{event_type}: snapshot required"))
         self.journal.audit("account_event", "state changed; reconciling")
         return True
 
     async def refresh(self):
         self.ready = False
+        self.rest_consistent = False
         if not self.connected:
             raise UnknownOutcome("Cannot reconcile disconnected stream")
         revision = self.revision
@@ -93,9 +99,12 @@ class AccountReconciler:
             raise UnknownOutcome("Account changed during reconciliation")
         self.snapshot = second
         self.last_heartbeat = self.clock()
-        self.ready = True
-        self.audit.append(AuditEvent("reconciliation", "two REST inventories matched"))
-        self.journal.audit("reconciliation", "matched two read-only snapshots")
+        self.rest_consistent = True
+        # Matching offset-paginated reads are diagnostics, NOT a coherent
+        # history boundary; never promote them to opening readiness.
+        self.ready = False
+        self.audit.append(AuditEvent("reconciliation", "REST matched; provider cutoff unproven"))
+        self.journal.audit("reconciliation", "REST matched; history still uncertain")
         return second
 
     def assert_opening_safe(self):

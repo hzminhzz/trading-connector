@@ -150,7 +150,7 @@ def test_propr_live_broker_lifecycle_and_queries():
         assert not broker.is_connected
         assert not await broker.is_connected_async()
 
-        with pytest.raises(RuntimeError):
+        with pytest.raises(PermissionError):
             broker.assert_live_trading()
 
         with pytest.raises(PermissionError):
@@ -159,7 +159,8 @@ def test_propr_live_broker_lifecycle_and_queries():
         await broker.connect()
         assert broker.is_connected
         assert await broker.is_connected_async()
-        broker.assert_live_trading()
+        with pytest.raises(PermissionError, match="disabled"):
+            broker.assert_live_trading()
 
         # Account balances
         val = await broker.get_account_value_async()

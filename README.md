@@ -23,6 +23,10 @@ Additional providers are added under `connectors/<provider>/` without coupling t
 - **Safety:** no trading actions from repository setup, import, test discovery, or read-only diagnostics. All mutation-capable tests are explicitly gated.
 - **Secrets:** credentials belong in the environment or a secret manager; do not commit `.env`, API keys, positions, account identifiers, or raw authenticated responses.
 
+## Native Propr evidence for Guardian
+
+The versioned, read-only native contract lives in `connectors/propr/native_evidence.py`; see [NATIVE_EVIDENCE.md](connectors/propr/NATIVE_EVIDENCE.md). It exposes exact financial provenance and native inventory with independently explicit UNKNOWN cash/history cutoff. `prop-production` Guardian remains the sole order and financial-journal authority. All remote Propr mutations remain denied, including the optional callable ML4T methods.
+
 ## Build and test
 
 The base package installs with `pip install -e ".[test]"`. ML4T is optional, pinned to the locally inspected `ml4t-live==0.1.2` adapter boundary. The default GitHub Actions workflow uses only credential-free fixtures.

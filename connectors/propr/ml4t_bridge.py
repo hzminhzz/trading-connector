@@ -360,8 +360,8 @@ class ProprLiveBroker:
         )
 
     def assert_live_trading(self) -> None:
-        if not self._connected or not getattr(self.client, "account_id", None):
-            raise RuntimeError("Live trading requires a connected, explicitly bound account")
+        # A connected read-only client is not an execution authorization.
+        raise PermissionError("Propr remote execution is disabled at SDK HTTP boundary")
     async def _sync_state(self) -> None:
         raw_positions = await asyncio.to_thread(self.client.get_open_positions)
         new_positions = {}
