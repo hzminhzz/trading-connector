@@ -8,6 +8,13 @@ This repository is a **multi-provider custom trading connector library**. Do not
 3. Identify the target provider environment, explicit account identity, trading permissions and rollback path.
 4. Do not commit secrets, credentials, unredacted account snapshots, or private research data.
 
+## Binding cross-repository sizing decision (2026-11-06)
+
+- New copytrading strategies default to **risk-budgeted fixed-k mirroring**: follower target position quantity = research-approved signed `k` × selected leader perpetual position quantity. Leader whole-account NAV, parent/child equity reconstruction and Vike NAV are **not connector requirements**. Do not stop connector, paper, or execution integration asking for source NAV in this mode.
+- Legacy leader-equity-relative replication is **explicit opt-in** and remains strict about source NAV, but it is a research/planner decision, never a transport adapter's universal veto.
+- **Still mandatory:** account-bound, verified **follower** equity/headroom and inventory; signed and time-valid planner intent, market/lot/quantity constraints, current risk permit from `prop-production` Guardian, reconcile-after-reconnect, duplicate-safe idempotent orders, HALT and prop-firm rules. No source-NAV absence may turn an unsafe follower order into a safe one, or vice versa.
+- This library only transports and normalizes provider data. It must not pick k, invent leader exposure, bypass Guardian loss budgets or grant trading authorization. See `docs/architecture.md` and `prop-production/docs/SIZING-POLICY.md` in its owning repository.
+
 ## Design boundaries
 - Place each provider under `connectors/<provider>/`; keep providers independent.
 - Prefer a provider-neutral internal execution representation, with a strictly isolated translation boundary for each provider.
