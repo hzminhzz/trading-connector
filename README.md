@@ -36,7 +36,7 @@ scope, causal clocks, reconciliation, provider constraints and the owning risk
 authority remain mandatory. Explicit legacy NAV-relative sizing belongs to the
 planner/research policy. A transport cannot pick k or grant risk authorization.
 
-See [architecture](docs/architecture.md) and [agent instructions](AGENTS.md).
+See [architecture](docs/architecture.md), [agent instructions](AGENTS.md) and the [2026-11-07 unfinished provider/account disposition](docs/PROVIDER-DRAFT-DISPOSITION-20261107.md). Optional local provider drafts are not active release dependencies.
 
 ## Development and verification
 
