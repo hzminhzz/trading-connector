@@ -44,7 +44,7 @@ An explicitly authorized one-shot W028 HYPE initial-position test executed a buy
 | Challenge/API classification | Written account-specific confirmation of `/orders` routing, challenge fee and evaluation consequences | Official public materials describe simulated signals and possible live copying, but conflict with SDK production wording; exact API semantics unverified |
 | Shadow | Actual installed ML4T strategy and feed through `LiveEngine`; no mutation; fault/reconciliation checks | Smoke passed |
 | Paper record | At least four weeks of documented operation under explicitly scoped account, fee, evaluation and risk limits | Not met |
-| Live operation | ProprLiveBroker integration tests passed; authenticated live connectivity and balance sync verified | READY (requires explicit user order authorization) |
+| Live operation | Account-specific provider evidence, four-week paper policy and explicit authorization | NO-GO; SDK network mutations are denied. See [transport hardening](TRANSPORT_HARDENING.md). |
 If any account-safety evidence is ambiguous, keep the mutation gate closed and report the missing evidence; do not change configuration to bypass it.
 
 ## Source references

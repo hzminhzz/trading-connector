@@ -12,14 +12,41 @@ Usage:
 """
 
 import os
+import re
+from dataclasses import dataclass
 from decimal import Decimal
-from typing import Any, Optional
-from ulid import ULID
+from typing import Any, Callable, Optional
+from urllib.parse import urlsplit
 
 import requests
-from dotenv import load_dotenv
 
-load_dotenv()
+
+@dataclass(frozen=True)
+class SyntheticTransport:
+    """Explicit zero-capital callback, usable only at the reserved .invalid origin."""
+    request: Callable[..., requests.Response]
+
+
+class _ReadOnlySession(requests.Session):
+    """Deny at Session.send, including callers bypassing the SDK request helper."""
+    def __init__(self, base_url: str):
+        super().__init__()
+        self._bound_origin = urlsplit(base_url).netloc
+
+    def send(self, request, **kwargs):
+        parsed = urlsplit(request.url)
+        if request.method.upper() not in ("GET", "HEAD", "OPTIONS"):
+            raise PermissionError("Propr mutation prohibited at HTTP transport boundary")
+        if parsed.scheme != "https" or parsed.netloc != self._bound_origin:
+            raise PermissionError("Propr endpoint binding mismatch")
+        kwargs["allow_redirects"] = False
+        return super().send(request, **kwargs)
+
+
+def _intent_id(value):
+    if not isinstance(value, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", value):
+        raise ValueError("A persisted client intent ID is required")
+    return value
 
 __version__ = "0.1.0"
 class ProprAPIError(Exception):
@@ -46,6 +73,8 @@ class ProprClient:
         api_key: str | None = None,
         base_url: str | None = None,
         timeout: int = 30,
+        *,
+        synthetic_transport: SyntheticTransport | None = None,
     ):
         self.api_key = api_key or os.getenv("PROPR_API_KEY")
         self.base_url = (
@@ -53,9 +82,18 @@ class ProprClient:
             or os.getenv("PROPR_API_URL")
             or "https://api.propr.xyz/v1"
         )
+        parsed = urlsplit(self.base_url)
+        if parsed.scheme != "https" or not parsed.netloc or parsed.username or parsed.query or parsed.fragment:
+            raise ValueError("Explicit canonical HTTPS endpoint required")
+        if synthetic_transport is not None and (
+            type(synthetic_transport) is not SyntheticTransport
+            or self.base_url != "https://fixture.invalid/v1" or api_key != "fixture"
+        ):
+            raise PermissionError("Synthetic transport requires fixture-only endpoint and identity")
+        self._synthetic_transport = synthetic_transport
         self.timeout = timeout
         self.account_id: str | None = None
-        self._session = requests.Session()
+        self._session = _ReadOnlySession(self.base_url)
         self._session.headers.update({
             "Content-Type": "application/json",
         })
@@ -78,10 +116,22 @@ class ProprClient:
         json: dict | None = None,
     ) -> requests.Response:
         """Make an API request and raise on error."""
+        if not isinstance(path, str) or not path.startswith("/") or ".." in path or "//" in path:
+            raise ValueError("Relative bound API path required")
         url = f"{self.base_url}{path}"
-        response = self._session.request(
-            method, url, params=params, json=json, timeout=self.timeout
-        )
+        method = method.upper()
+        if self._synthetic_transport is None:
+            if method not in ("GET", "HEAD", "OPTIONS"):
+                raise PermissionError("Propr remote mutations remain NO-GO")
+            response = self._session.request(
+                method, url, params=params, json=json, timeout=self.timeout, allow_redirects=False
+            )
+        else:
+            if not url.startswith("https://fixture.invalid/v1/"):
+                raise PermissionError("Synthetic endpoint changed")
+            response = self._synthetic_transport.request(
+                method, url, params=params, json=json, timeout=self.timeout
+            )
 
         if response.status_code >= 400:
             try:
@@ -134,6 +184,8 @@ class ProprClient:
                 "No active challenge found. Purchase a challenge at "
                 "https://app.propr.xyz/dashboard first."
             )
+        if len(attempts) != 1:
+            raise ValueError("Account discovery is ambiguous; bind one exact account")
         self.account_id = attempts[0]["accountId"]
         return self.account_id
 
@@ -337,6 +389,7 @@ class ProprClient:
         time_in_force: str | None = None,
         reduce_only: bool = False,
         close_position: bool = False,
+        client_intent_id: str | None = None,
     ) -> list[dict]:
         """
         Place a single order.
@@ -365,7 +418,7 @@ class ProprClient:
         exchange_asset = asset.split("/")[0] if "/" in asset else asset
         order: dict[str, Any] = {
             "accountId": self.account_id,
-            "intentId": str(ULID()),
+            "intentId": _intent_id(client_intent_id),
             "exchange": "hyperliquid",
             "type": order_type,
             "side": side,
@@ -392,8 +445,8 @@ class ProprClient:
         """
         Place multiple orders in a batch.
 
-        Each order dict should contain all required fields. If intentId is missing,
-        one is generated automatically.
+        Each order must carry the caller's previously persisted intentId.
+        Missing identity is rejected; no local retry or server deduplication is assumed.
 
         Args:
             orders: List of order dicts.
@@ -401,14 +454,17 @@ class ProprClient:
         Returns:
             List of created order dicts.
         """
-        for order in orders:
-            if "intentId" not in order:
-                order["intentId"] = str(ULID())
-            if "accountId" not in order:
-                order["accountId"] = self.account_id
+        payload = [dict(order) for order in orders]
+        for order in payload:
+            order["intentId"] = _intent_id(order.get("intentId"))
+            order.setdefault("accountId", self.account_id)
+            if order["accountId"] != self.account_id:
+                raise ValueError("Cross-account order prohibited")
+        if len({o["intentId"] for o in payload}) != len(payload):
+            raise ValueError("Duplicate client intent ID")
 
         return self._post(
-            self._account_path("/orders"), json={"orders": orders}
+            self._account_path("/orders"), json={"orders": payload}
         ).get("data", [])
 
     def cancel_order(self, order_id: str) -> dict | None:
@@ -421,12 +477,8 @@ class ProprClient:
         Returns:
             Cancelled order dict, or None if already filled/cancelled.
         """
-        try:
-            return self._post(self._account_path(f"/orders/{order_id}/cancel"))
-        except ProprAPIError as e:
-            if e.status_code == 400:
-                return None  # Already filled or cancelled
-            raise
+        # A 400 response does not prove cancellation or absence of a racing fill.
+        return self._post(self._account_path(f"/orders/{order_id}/cancel"))
 
     def cancel_all_orders(self, base: str | None = None) -> list[dict]:
         """

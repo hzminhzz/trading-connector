@@ -23,6 +23,7 @@ class Trade:
     fee: Decimal | None = None
     account_id: str | None = None
     side: str | None = None
+    funding: Decimal | None = None  # UNKNOWN unless a documented per-fill field exists.
 
 
 @dataclass(frozen=True)
@@ -104,7 +105,8 @@ def parse_trade(row):
         row, "tradeId", "orderId", "asset", "quantity", "price", "executedAt"
     )
     qty, px = _decimal(quantity), _decimal(price)
-    if qty <= 0 or px <= 0 or not str(timestamp).strip():
+    if (qty <= 0 or px <= 0 or not str(timestamp).strip()
+            or row.get("side") not in (None, "buy", "sell")):
         raise RemoteAPIError("Invalid provider trade")
     return Trade(
         id=str(ident), order_id=str(order_id), asset=str(asset), quantity=qty,

@@ -22,13 +22,17 @@ def test_reconnect_duplicate_event_and_stale(tmp_path):
         with pytest.raises(UnknownOutcome):
             r.assert_opening_safe()
         await r.refresh()
-        r.assert_opening_safe()
+        assert r.rest_consistent and not r.ready and r.history_cutoff is None
+        with pytest.raises(UnknownOutcome):
+            r.assert_opening_safe()
         assert r.event("e1", "order.filled", {"quantity": "1"})
         assert not r.event("e1", "order.filled", {"quantity": "1"})
         with pytest.raises(UnknownOutcome):
             r.assert_opening_safe()
         await r.refresh()
-        r.assert_opening_safe()
+        assert r.rest_consistent and not r.ready
+        with pytest.raises(UnknownOutcome):
+            r.assert_opening_safe()
         clock[0] = 6
         with pytest.raises(UnknownOutcome):
             r.assert_opening_safe()
@@ -37,7 +41,9 @@ def test_reconnect_duplicate_event_and_stale(tmp_path):
             await r.refresh()
         r.connected_unverified()
         await r.refresh()
-        r.assert_opening_safe()
+        assert r.rest_consistent and not r.ready
+        with pytest.raises(UnknownOutcome):
+            r.assert_opening_safe()
         assert reader.calls == 6
     asyncio.run(run())
     journal.close()

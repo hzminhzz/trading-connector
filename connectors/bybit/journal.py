@@ -2,13 +2,11 @@
 """Durable SQLite WAL order intent journal and reconciliation gate for Bybit."""
 from __future__ import annotations
 
-import json
 import secrets
 import sqlite3
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 _CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
 
