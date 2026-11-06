@@ -6,9 +6,13 @@ import json
 
 import pytest
 
-pm = pytest.importorskip("copytrade_pm")
-from copytrade_pm import pm_sources, pm_combo2_rest_capture as capture  # noqa: E402
-from copytrade_pm.pm_combo2_signed_delta import compare_generations  # noqa: E402
+pm_sources = pytest.importorskip("copytrade_pm.pm_sources")
+# This historical canary needs the explicit Combo2 research extension. A base
+# research package is insufficient and must not break native-provider discovery.
+capture = pytest.importorskip("copytrade_pm.pm_combo2_rest_capture")
+compare_generations = pytest.importorskip(
+    "copytrade_pm.pm_combo2_signed_delta"
+).compare_generations
 
 from connectors.propr.examples import free_trial_delta_canary as canary  # noqa: E402
 from connectors.propr.state import IntentJournal  # noqa: E402

@@ -28,17 +28,22 @@ def verified_projection(paper_root: Path, run_id: str, sqlite_path: Path) -> dic
         or policy.get("account_alias") != "#JhW9"
     ):
         raise ValueError("WRONG_OR_LIVE_PAPER_RUN")
-    prospective = manifest.get("ingress_mode") == "verified_prospective_source_v1"
+    ingress = manifest.get("ingress_mode")
+    extension = {}
+    if ingress is not None:
+        if ingress != "verified_prospective_source_v1":
+            raise ValueError("UNSUPPORTED_PAPER_INGRESS")
+        extension = {
+            "prospective": True,
+            "source_evidence_hashes": manifest["source_scope_evidence_shas"],
+            "market_contract_sha": manifest["market_contract_sha"],
+        }
     tracker = Combo2PaperTracker(
         paper_root,
         run_id=run_id,
         started_at=manifest["started_at"],
         source_subject_hashes=manifest["source_subject_hashes"],
-        prospective=prospective,
-        source_evidence_hashes=(
-            manifest["source_scope_evidence_shas"] if prospective else None
-        ),
-        market_contract_sha=(manifest["market_contract_sha"] if prospective else None),
+        **extension,
     )
     # Constructor validates the immutable manifest, every event SHA and every
     # post-state. The replay below independently verifies each paper action.
