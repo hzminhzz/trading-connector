@@ -2,6 +2,10 @@
 
 This repository is a **multi-provider custom trading connector library**. Do not turn it into a Propr-only system or put trading strategies here.
 
+## Current provider-scope disposition (2026-11-07)
+
+Read [provider draft disposition](docs/PROVIDER-DRAFT-DISPOSITION-20261107.md) before promoting local unfinished provider/account work. Existing Propr and Bybit Demo pins remain the only current cross-repository integration. Unpublished cTrader, MatchTrader, MT5 and Backed work is optional, not a gate. Never auto-load `BYBIT_PROP_*` credentials into the current Demo identity, change Propr intent/order schema, treat buying power as Guardian cash, or merge bridge method changes as routine cleanup. Keep those changes preserved outside the active path pending separate semantics and tests.
+
 ## Before changes
 1. Read `README.md`, `docs/architecture.md`, and the specific `connectors/<provider>/PLAN.md`.
 2. Inspect the actual installed source and versions of any target trading framework before writing an adapter. Do not implement from guessed protocol signatures.
