@@ -4,10 +4,8 @@
 import asyncio
 from datetime import UTC, datetime
 from decimal import Decimal
-from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
-import pytest
 from ml4t.backtest.strategy import Strategy
 from ml4t.backtest.types import OrderSide, OrderType
 from ml4t.live.engine import LiveEngine
