@@ -172,8 +172,11 @@ def test_feed_fails_closed_on_future_event():
 
 def test_feed_fails_closed_on_silence_timeout():
     mock_exchange = MagicMock()
-    # Exchange hangs / goes silent
-    mock_exchange.watch_ohlcv = AsyncMock(side_effect=asyncio.sleep(10))
+    # Await a real pending operation; do not leak an unawaited coroutine.
+    async def silent_exchange(*args, **kwargs):
+        await asyncio.sleep(10)
+
+    mock_exchange.watch_ohlcv = AsyncMock(side_effect=silent_exchange)
 
     feed = BybitKlineFeed(
         asset="BTC/USDT",

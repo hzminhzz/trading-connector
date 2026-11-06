@@ -15,7 +15,7 @@ import os
 import re
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Any, Callable, Optional
+from typing import Any, Callable
 from urllib.parse import urlsplit
 
 import requests

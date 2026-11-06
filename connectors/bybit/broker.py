@@ -9,7 +9,11 @@ from typing import Any
 from connectors.bybit.client import BybitClient
 from connectors.bybit.config import BybitConfig, Environment, Mode
 from connectors.bybit.journal import BybitIntentJournal
-from connectors.bybit.models import BybitOrderData
+from connectors.bybit.models import (
+    BybitInsufficientFundsError,
+    BybitInvalidOrderError,
+    BybitOrderData,
+)
 try:
     from ml4t.backtest.types import Order, OrderSide, OrderStatus, OrderType, Position
     from ml4t.live.protocols import AsyncBrokerProtocol, ExecutionCapability
@@ -158,8 +162,12 @@ class BybitLiveBroker:
         type_str = "market" if order_type == OrderType.MARKET else "limit"
 
         # Check existing position for reduce_only logic if applicable
-        reduce_only = kwargs.get("reduce_only", False)
+        reduce_only = bool(kwargs.get("reduce_only", False) or kwargs.get("reducing_risk", False))
         params = dict(kwargs.get("params") or {})
+        if "orderLinkId" in params or "clientOrderId" in params:
+            raise ValueError("Client identity must use intent_idempotency_key")
+        if "reduceOnly" in params and params["reduceOnly"] is not reduce_only:
+            raise ValueError("Conflicting reduce-only semantics")
         if stop_price is not None:
             params["stopPrice"] = stop_price
 
@@ -171,7 +179,9 @@ class BybitLiveBroker:
             order_type=type_str,
             limit_price=limit_price,
             reduce_only=reduce_only,
+            intent_id=kwargs.get("intent_idempotency_key"),
         )
+        params["orderLinkId"] = intent.id
 
         try:
             order_data = await self.client.create_order(
@@ -184,13 +194,31 @@ class BybitLiveBroker:
                 params=params,
             )
             self.journal.mark_submitted(intent.id, order_data.order_id)
-        except Exception as exc:
-            self.journal.mark_unknown(intent.id, str(exc))
+            if order_data.status.lower() in {"rejected", "cancelled"}:
+                self.journal.mark_terminal(
+                    intent.id,
+                    order_data.status,
+                    detail=f"order {order_data.status} by venue",
+                )
+        except BaseException as exc:
+            message = type(exc).__name__
+            # Only typed authoritative pre-acceptance refusals establish rejection.
+            # Wording such as "invalid response" after a timeout proves nothing.
+            rejected = isinstance(exc, (BybitInsufficientFundsError, BybitInvalidOrderError, PermissionError))
+            if rejected:
+                self.journal.mark_rejected(intent.id, message)
+            else:
+                self.journal.mark_unknown(intent.id, message)
             raise
 
-        ml4t_order = self._parse_order(order_data, default_asset=asset)
-        await self._sync_state()
-        return ml4t_order
+        try:
+            ml4t_order = self._parse_order(order_data, default_asset=asset)
+            ml4t_order.intent_idempotency_key = intent.id
+            await self._sync_state()
+            return ml4t_order
+        except BaseException as exc:
+            self.journal.mark_unknown(intent.id, "Accepted order requires reconciliation: " + type(exc).__name__)
+            raise
 
     def _assert_execution_allowed(self, operation: str) -> None:
         if self.client.config.mode != Mode.EXECUTION:
@@ -224,8 +252,8 @@ class BybitLiveBroker:
             raise ValueError(f"Cannot resolve exchange symbol for order {order_id} on Bybit")
 
         success = await self.client.cancel_order(order_id, symbol=symbol)
-        if success:
-            self._pending_orders = [o for o in self._pending_orders if o.order_id != order_id]
+        # A cancellation ACK is not a terminal order observation. Keep pending
+        # exposure until a fresh provider snapshot or execution event resolves it.
         return success
 
     async def replace_order_async(
