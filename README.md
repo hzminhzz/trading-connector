@@ -1,5 +1,7 @@
 # Trading Connectors
 
+**Copy-sizing policy (2026-11-06):** This is a transport library, not a source-NAV gate. Risk-budgeted signed fixed-k strategies may mirror a selected leader perp account's position quantities without reconstructing leader whole-account NAV. The actual follower account equity, provider reconciliation, independently validated order intents and Guardian risk permits are still mandatory. Historical equity-relative research remains separate and opt-in. See [architecture boundary](docs/architecture.md).
+
 A home for reusable, independently testable connectors to trading venues, brokers, and prop-trading platforms.
 
 **Scope:** this is a multi-provider integration library, not a strategy repository or a Propr-specific application. Providers live in their own directories; strategies, datasets, and research results belong in their owning projects.

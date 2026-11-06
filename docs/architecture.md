@@ -1,5 +1,9 @@
 # Shared Connector Architecture
 
+## NAV-free fixed-k planning boundary (owner decision, 2026-11-06)
+
+Risk-budgeted fixed-k leader copying is a planner/Guardian strategy: notional target = signed per-pod k × observed native quantity × source mark in the **selected** leader account/market scope, converted to a follower quantity at an independently verified follower quote. Leader whole-account NAV is optional, not a connector precondition. Providers return authoritative **follower** account equity/headroom, positions, order/fill status and venue capabilities; do not confuse follower equity with leader NAV. Only `prop-production` Guardian verifies the signed plan, follower risk budget, daily/trailing rules, reservations and permissions. No transport may substitute a Vike leader equity estimate, silently infer k or bypass a missing Guardian permit. Existing source-equity-relative fidelity studies remain opt-in and unaffected.
+
 **Status: design target; not implemented.**
 
 ## Goals
