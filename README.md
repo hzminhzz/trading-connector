@@ -1,44 +1,69 @@
 # Trading Connectors
 
-**Copy-sizing policy (2026-11-06):** This is a transport library, not a source-NAV gate. Risk-budgeted signed fixed-k strategies may mirror a selected leader perp account's position quantities without reconstructing leader whole-account NAV. The actual follower account equity, provider reconciliation, independently validated order intents and Guardian risk permits are still mandatory. Historical equity-relative research remains separate and opt-in. See [architecture boundary](docs/architecture.md).
+Provider transports, native data normalization and optional framework bridges.
+Strategies, portfolio selection and account finance belong to their consuming
+applications. This remains a multi-provider library.
 
-A home for reusable, independently testable connectors to trading venues, brokers, and prop-trading platforms.
+## Providers and authority
 
-**Scope:** this is a multi-provider integration library, not a strategy repository or a Propr-specific application. Providers live in their own directories; strategies, datasets, and research results belong in their owning projects.
+| Provider | Scope | Guide |
+| --- | --- | --- |
+| Propr | Native read-only evidence and synthetic shadow; remote mutations denied | [Provider](connectors/propr/README.md), [native evidence](connectors/propr/NATIVE_EVIDENCE.md), [operator runbook](connectors/propr/OPERATOR_RUNBOOK.md) |
+| Bybit | Separate Demo read-only account observer, provider transport and optional ML4T bridge | [Provider](connectors/bybit/README.md), [order boundary](connectors/bybit/PLAN.md) |
+| Hyperliquid | Independent provider and market-data integration | [Provider](connectors/hyperliquid/README.md) |
 
-**ML4T ownership:** `/home/quant/dev/quant/quant-research` is the authoritative trading/research environment for our `ml4t-live` integration. Verify the installed framework package and protocol in that environment before changing provider adapters. This repository owns provider-specific connectors and optional ML4T bridges, **not** `ml4t-live` itself. A separate `/home/quant/dev/quant/ml4t-live` checkout and the documentation copies under `docs/ml4t-live/` must not be treated as authoritative runtime source.
+Existing explicit order-capable diagnostics do not grant permission to run them.
+Reconciliation work defaults to SHADOW / NO_TRADE; do not submit orders, cancel
+positions, change leverage or use account-wide actions without separate authority.
+A named Beta or Demo environment is not sufficient proof of account permissions.
 
-## Connectors
+The official Propr SDK owns its endpoints. `propr_native_evidence_v1` preserves
+provider identity, equity provenance and explicit UNKNOWN cash/history cutoff.
+Do not manufacture cash as equity minus unrealized PnL or infer coherent history
+from two matching REST snapshots.
 
-| Provider | Status | Documentation | Implementation |
-| --- | --- | --- | --- |
-| [Propr](connectors/propr/) | Read-only and synthetic-shadow candidate; remote execution **NO-GO** | [Runbook](connectors/propr/OPERATOR_RUNBOOK.md), [Release report](connectors/propr/RELEASE_REPORT.md), [Plan](connectors/propr/PLAN.md) | [Provider code](connectors/propr/README.md) |
+Guardian in prop-production owns protected follower finance, risk permits and
+durable production intents. It consumes native clients rather than connector-owned
+ML4T journals. Standalone ML4T bridges remain separate optional consumers of the
+installed `ml4t-live==0.1.2` protocol.
 
-Additional providers are added under `connectors/<provider>/` without coupling their logic to Propr or another provider.
+## Sizing boundary
 
-## Repository conventions
+Default copying uses signed `FIXED_K_NATIVE_QUANTITY`: k × selected leader
+quantity × source mark gives notional, converted at the follower quote.
+Leader whole-account NAV is optional. Follower equity/headroom, selected source
+scope, causal clocks, reconciliation, provider constraints and the owning risk
+authority remain mandatory. Explicit legacy NAV-relative sizing belongs to the
+planner/research policy. A transport cannot pick k or grant risk authorization.
 
-- **Shared contracts:** [docs/architecture.md](docs/architecture.md) describes reusable order, execution, account, position, market-data, and lifecycle boundaries. It is an architecture target, not an implemented API.
-- **Provider isolation:** each `connectors/<provider>/` owns its API transport, mappings, configuration, tests, examples, and plan.
-- **Downstream integrations:** adapters for consumers such as `ml4t-live` should be thin, optional bridges, not the foundation of the transport.
-- **Environment isolation:** production credentials/endpoints are never substituted for test credentials/endpoints. A named `beta` environment is not presumed to mean risk-free paper execution.
-- **Safety:** no trading actions from repository setup, import, test discovery, or read-only diagnostics. All mutation-capable tests are explicitly gated.
-- **Secrets:** credentials belong in the environment or a secret manager; do not commit `.env`, API keys, positions, account identifiers, or raw authenticated responses.
+See [architecture](docs/architecture.md) and [agent instructions](AGENTS.md).
 
-## Native Propr evidence for Guardian
+## Development and verification
 
-The versioned, read-only native contract lives in `connectors/propr/native_evidence.py`; see [NATIVE_EVIDENCE.md](connectors/propr/NATIVE_EVIDENCE.md). It exposes exact financial provenance and native inventory with independently explicit UNKNOWN cash/history cutoff. `prop-production` Guardian remains the sole order and financial-journal authority. All remote Propr mutations remain denied, including the optional callable ML4T methods.
+The reviewed source baseline is GitHub `main`; inspect the current default branch,
+remote SHA, dirty files and active worktrees before changes. Preserve other sessions.
+Private credentials, account responses, datasets and journals remain outside Git.
+This source repository is public; the program's private data is not publishable.
 
-## Build and test
+The authoritative installed ML4T integration is in the operator's quant-research
+environment. Inspect its actual protocol before modifying an adapter. Copies under
+`docs/ml4t-live/` are reference material, not runtime source.
 
-The base package installs with `pip install -e ".[test]"`. ML4T is optional, pinned to the locally inspected `ml4t-live==0.1.2` adapter boundary. The default GitHub Actions workflow uses only credential-free fixtures.
+The base package installs with `pip install -e ".[test]"`. Optional ML4T and
+provider dependencies must match the consuming application's verified environment.
 
 ```bash
-python -m pytest -q connectors/propr/tests
-python -m ruff check connectors/propr
+python -m pytest -q connectors
+python -m ruff check connectors propr_sdk.py
 uv build --offline
 ```
 
-## Development status
+Default tests use synthetic responses. Credential-dependent integration tests
+remain skipped unless their separately authorized environment is supplied.
+GitHub Actions is optional; record exact commit, dependencies, pass/skip counts
+and build results. Cross-repository pins are owned by
+`prop-production/src/prop_production/compatibility.json` and checked by its
+`scripts/verify-local.sh all`; do not introduce another independent pin list.
 
-Propr has a production-only read-only REST gateway, conservative WebSocket reconciliation, synthetic order/kill-switch drills, shadow decisions and an optional ML4T LiveEngine integration. **No remote order calls are implemented or authorized.** The release remains **NO-GO for execution** until account-class safety, four weeks of paper evidence and separate approval are established. See the [qualification report](connectors/propr/RELEASE_REPORT.md).
+Passing unit tests establishes deterministic engineering behavior. It does not
+qualify provider semantics, executable follower PnL or trading authorization.

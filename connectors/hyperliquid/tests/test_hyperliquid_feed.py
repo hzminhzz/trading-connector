@@ -169,7 +169,10 @@ def test_feed_fails_closed_on_future_event():
 
 def test_feed_fails_closed_on_silence_timeout():
     mock_exchange = MagicMock()
-    mock_exchange.watch_ohlcv = AsyncMock(side_effect=asyncio.sleep(10))
+    async def silent_exchange(*args, **kwargs):
+        await asyncio.sleep(10)
+
+    mock_exchange.watch_ohlcv = AsyncMock(side_effect=silent_exchange)
 
     feed = HyperliquidKlineFeed(
         asset="BTC/USDC",
