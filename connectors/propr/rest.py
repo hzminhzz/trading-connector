@@ -1,11 +1,17 @@
 """Async read-only Propr REST transport. All network mutations fail before I/O."""
 from dataclasses import dataclass
+from decimal import Decimal
+import json
 from typing import Any
 import httpx
 
 
 class RemoteAPIError(RuntimeError):
     """Redacted provider error; never include response bodies or auth headers."""
+
+
+def _reject_nonfinite_json_token(_value: str):
+    raise ValueError("Non-finite provider JSON token")
 
 
 class ProviderHTTPError(RemoteAPIError):
@@ -68,7 +74,10 @@ class ProprRest:
             response.raise_for_status()
             if method.upper() == "HEAD" or response.status_code == 204:
                 return {}
-            return response.json()
+            # json.Response.json() rounds JSON fractional tokens to binary floats before
+            # financial-field validation can observe them. Preserve exact lexemes.
+            return json.loads(response.content, parse_float=Decimal,
+                              parse_constant=_reject_nonfinite_json_token)
         except httpx.TimeoutException as exc:
             raise RemoteAPIError("Provider timeout; outcome not inferred") from exc
         except httpx.HTTPStatusError as exc:

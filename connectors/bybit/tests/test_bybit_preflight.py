@@ -141,14 +141,13 @@ def test_native_read_only_preflight_and_no_mutations(exchange, demo_config, tmp_
     )
     safe = SafeBroker(broker, config)
     try:
-        native = asyncio.run(safe.preflight_async())
-        assert native["passed"] is True
-        assert native["broker_connected"] is True
-        assert native["account_value"] == 5000.10
-        assert native["cash"] == 4800.25
-        assert native["reconciliation"]["clean"] is True
-        assert native["reconciliation"]["live_positions"] == {}
-        assert native["reconciliation"]["live_pending_orders"] == []
+        asyncio.run(broker.connect())
+        assert broker.is_connected is True
+        assert asyncio.run(broker.get_account_value_async()) == 5000.10
+        assert asyncio.run(broker.get_positions_async()) == {}
+        assert asyncio.run(broker.get_pending_orders_async()) == []
+        with pytest.raises(ValueError, match="cash is unverified"):
+            asyncio.run(safe.preflight_async())
         assert client.preflight_identity_evidence["authenticated_uid_matches_expected"]
         assert safe.persistence_status["state_error"] is None
         assert safe.persistence_status["journal_error"] is None
@@ -179,11 +178,12 @@ def test_native_preflight_reports_unexpected_pending_order_without_mutating(exch
         state_file=tmp_path / "native_risk.json",
     ))
     try:
-        native = asyncio.run(safe.preflight_async())
-        assert native["passed"] is False
-        assert native["reconciliation"]["clean"] is False
-        assert len(native["reconciliation"]["unexpected_pending_orders"]) == 1
-        assert native["reconciliation"]["live_pending_orders"][0]["quantity"] == 0.02
+        asyncio.run(broker.connect())
+        pending = asyncio.run(broker.get_pending_orders_async())
+        assert len(pending) == 1
+        assert pending[0].quantity == 0.02
+        with pytest.raises(ValueError, match="cash is unverified"):
+            asyncio.run(safe.preflight_async())
     finally:
         safe.close_persistence()
         broker.journal.close()
@@ -252,11 +252,12 @@ def test_native_preflight_sees_nonempty_demo_position_without_duplicate_aliases(
         state_file=tmp_path / "native_risk.json",
     ))
     try:
-        report = asyncio.run(safe.preflight_async())
-        assert report["passed"] is False  # fresh native state cannot explain broker exposure
-        assert report["reconciliation"]["clean"] is False
-        assert report["reconciliation"]["live_positions"] == {"BTC/USDT:USDT": 0.02}
-        assert report["reconciliation"]["unexpected_positions"] == {"BTC/USDT:USDT": 0.02}
+        asyncio.run(broker.connect())
+        positions = asyncio.run(broker.get_positions_async())
+        assert set(positions) == {"BTC/USDT:USDT"}
+        assert positions["BTC/USDT:USDT"].quantity == 0.02
+        with pytest.raises(ValueError, match="cash is unverified"):
+            asyncio.run(safe.preflight_async())
     finally:
         safe.close_persistence()
         broker.journal.close()

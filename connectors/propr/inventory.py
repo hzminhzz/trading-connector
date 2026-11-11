@@ -67,15 +67,23 @@ def parse_order(row):
     ident, asset, side, position_side, status, quantity, filled = _required(
         row, "orderId", "asset", "side", "positionSide", "status", "quantity", "cumulativeQuantity"
     )
+    reduce_only = row.get("reduceOnly")
+    if reduce_only is not None and type(reduce_only) is not bool:
+        raise RemoteAPIError("Invalid provider reduceOnly flag")
     try:
+        parsed_status = OrderStatus(status)
+        total, cumulative = _decimal(quantity), _decimal(filled)
+        if (parsed_status is OrderStatus.FILLED and cumulative != total
+                or parsed_status is OrderStatus.PARTIAL and not 0 < cumulative < total):
+            raise ValueError("Inconsistent provider order status/fill")
         return Order(
             id=str(ident), intent_id=row.get("intentId"), asset=str(asset),
             side=str(side), position_side=str(position_side),
-            status=OrderStatus(status), quantity=_decimal(quantity),
-            filled=_decimal(filled), average_price=_optional_decimal(row, "averageFillPrice"),
+            status=parsed_status, quantity=total,
+            filled=cumulative, average_price=_optional_decimal(row, "averageFillPrice"),
             account_id=row.get("accountId"), position_id=row.get("positionId"),
             created_at=row.get("createdAt"), updated_at=row.get("updatedAt"),
-            reduce_only=row.get("reduceOnly"), order_type=row.get("type"),
+            reduce_only=reduce_only, order_type=row.get("type"),
             fee_paid=_optional_decimal(row, "cumulativeTradingFees"),
         )
     except (ValueError, TypeError) as exc:
@@ -84,6 +92,8 @@ def parse_order(row):
 
 def parse_position(row):
     ident, asset, side, quantity = _required(row, "positionId", "asset", "positionSide", "quantity")
+    if row.get("status") not in ("open", "closed"):
+        raise RemoteAPIError("Unsupported provider position status")
     try:
         return Position(
             id=str(ident), asset=str(asset), side=str(side), quantity=_decimal(quantity),

@@ -48,7 +48,7 @@ class BybitLiveBroker:
         self._positions: dict[str, Position] = {}
         self._pending_orders: list[Order] = []
         self._account_value: float = 0.0
-        self._cash: float = 0.0
+        self._cash: float | None = None  # Unverified until actual cash evidence exists.
 
     @property
     def execution_capabilities(self) -> frozenset[ExecutionCapability]:
@@ -112,6 +112,8 @@ class BybitLiveBroker:
 
     async def get_cash_async(self) -> float:
         await self._sync_balance()
+        if self._cash is None:
+            raise ValueError("Bybit ledger cash is unverified; buying power is not cash")
         return self._cash
 
     async def get_positions_async(self) -> dict[str, Position]:
@@ -336,7 +338,8 @@ class BybitLiveBroker:
         if isinstance(self.client, BybitClient) and self.client.config.environment is Environment.DEMO:
             account = await self.client.fetch_demo_account_summary()
             self._account_value = float(account.equity_usd)
-            self._cash = float(account.available_usd)
+            # V5 available-to-withdraw/available-to-trade is not ledger cash.
+            self._cash = None
             return
         balances = await self.client.fetch_balance()
         usdt_bal = balances.get("USDT") or balances.get("USD")
@@ -344,11 +347,7 @@ class BybitLiveBroker:
             self._account_value = float(usdt_bal.total)
             self._cash = float(usdt_bal.free)
         else:
-            # Fallback to total sum across all balances
-            total_val = sum(float(b.total) for b in balances.values())
-            free_val = sum(float(b.free) for b in balances.values())
-            self._account_value = total_val
-            self._cash = free_val
+            raise ValueError("Bybit quote-currency account balance unverified")
 
     async def _sync_positions(self) -> None:
         if not self.client.config.api_key or not self.client.config.api_secret:
@@ -359,8 +358,12 @@ class BybitLiveBroker:
             qty = float(p.size)
             if p.side == "sell" or p.side == "short":
                 qty = -abs(qty)
-            entry_px = float(p.entry_price) if p.entry_price is not None else 0.0
-            cur_px = float(p.mark_price) if p.mark_price is not None else entry_px
+            if p.side not in ("long", "short", "buy", "sell"):
+                raise ValueError("Unsupported Bybit native position side")
+            if p.entry_price is None or p.mark_price is None:
+                raise ValueError("Missing Bybit active position price")
+            entry_px = float(p.entry_price)
+            cur_px = float(p.mark_price)
 
             if self.client.config.environment is Environment.DEMO:
                 # V5 createdTime (ms) is required by the Demo snapshot parser.
@@ -402,7 +405,13 @@ class BybitLiveBroker:
             "cancelled": OrderStatus.CANCELLED,
             "rejected": OrderStatus.REJECTED,
         }
-        order_status = status_map.get(o.status.lower(), OrderStatus.PENDING)
+        if o.side not in ("buy", "sell", "long", "short"):
+            raise ValueError("Unsupported Bybit native order side")
+        if o.order_type not in ("limit", "market"):
+            raise ValueError("Unsupported Bybit native order type")
+        if o.status.lower() not in status_map:
+            raise ValueError("Unsupported Bybit native order status")
+        order_status = status_map[o.status.lower()]
         if self.client.config.environment is Environment.DEMO and o.timestamp is None:
             raise ValueError("Bybit Demo pending order missing creation timestamp")
 

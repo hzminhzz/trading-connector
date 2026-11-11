@@ -4,7 +4,7 @@ from decimal import Decimal
 from urllib.parse import quote
 
 from .config import ProprConfig, Mode
-from .models import finite_decimal
+from .models import exact_decimal_sum, finite_decimal
 from .rest import ProprRest, RemoteAPIError
 
 
@@ -75,7 +75,9 @@ def _optional_decimal(data, name):
 def parse_account(account_id, attempt_id, raw):
     if not isinstance(raw, dict):
         raise RemoteAPIError("Invalid account response shape")
-    if "data" in raw and isinstance(raw["data"], dict):
+    if "data" in raw:
+        if not isinstance(raw["data"], dict):
+            raise RemoteAPIError("Invalid account response shape")
         raw = raw["data"]
     if raw.get("accountId") is not None and raw["accountId"] != account_id:
         raise RemoteAPIError("Account snapshot identity mismatch")
@@ -87,8 +89,10 @@ def parse_account(account_id, attempt_id, raw):
     isolated_order = _optional_decimal(raw, "isolatedOrderMargin")
     reserved_components = (isolated, cross_position, cross_order, isolated_order)
     # Propr SDK formula: balance + totalUnrealizedPnl + isolatedPositionMargin.
-    equity = (balance + unrealized + isolated) if None not in (balance, unrealized, isolated) else None
-    margin_used = sum(reserved_components) if all(v is not None for v in reserved_components) else None
+    equity = (exact_decimal_sum(balance, unrealized, isolated)
+              if None not in (balance, unrealized, isolated) else None)
+    margin_used = (exact_decimal_sum(*reserved_components)
+                   if all(v is not None for v in reserved_components) else None)
     return AccountSnapshot(
         account_id=account_id, attempt_id=attempt_id, equity=equity,
         balance=balance, buying_power=_optional_decimal(raw, "availableBalance"),
@@ -124,12 +128,16 @@ class ReadOnlyAccount:
         binding = await discover_account(self.rest, self.config.account_id)
         account = await self.rest.request("GET", f"/accounts/{quote(binding.account_id, safe='')}")
         snapshot = parse_account(binding.account_id, binding.attempt_id, account)
+        native = account.get("data", account)
+        # Discovery binds the requested account, but does not attest the separate
+        # account snapshot when its provider echo is absent.
+        snapshot_attested = native.get("accountId") == binding.account_id
         return {
             "healthy": True,
             "services_healthy": True,
-            "account_bound": True,
+            "account_bound": snapshot_attested,
             "account_source": binding.source,
-            "financial_fields_verified": snapshot.complete,
+            "financial_fields_verified": snapshot.complete and snapshot_attested,
             "snapshot": snapshot,
         }
 
