@@ -7,6 +7,7 @@ from decimal import Decimal
 from typing import Any
 from urllib.parse import quote
 
+from ..execution_capabilities import ExecutionCapabilities
 from .account import discover_account, parse_account
 from .inventory import Inventory, InventoryReader
 from .models import finite_decimal, one_way_positions
@@ -58,6 +59,8 @@ class NativeEvidence:
     cutoff: str | None
     opening_ready: bool
     reasons: tuple[str, ...]
+    # No current provider reader establishes account-specific execution semantics.
+    execution_capabilities: tuple[ExecutionCapabilities, ...] = ()
 
 
 def unknown_financial():
