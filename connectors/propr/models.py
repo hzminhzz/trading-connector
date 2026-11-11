@@ -1,6 +1,6 @@
 """Typed Propr native snapshots; opaque IDs and Decimal values survive mapping."""
 from dataclasses import dataclass
-from decimal import Decimal
+from decimal import Decimal, localcontext
 from enum import Enum
 
 
@@ -16,13 +16,25 @@ class OrderStatus(str, Enum):
 
 
 def finite_decimal(value: object) -> Decimal:
+    if isinstance(value, bool) or not isinstance(value, (str, int, float, Decimal)):
+        raise ValueError("Invalid provider decimal")
     try:
         result = Decimal(str(value))
     except Exception as exc:
         raise ValueError("Invalid provider decimal") from exc
     if not result.is_finite():
         raise ValueError("Provider decimal must be finite")
+    digits = result.as_tuple().digits
+    if len(digits) > 256 or abs(result.as_tuple().exponent) > 1000:
+        raise ValueError("Provider decimal exceeds bounded precision or exponent")
     return result
+
+
+def exact_decimal_sum(*values: Decimal) -> Decimal:
+    """Preserve monetary wire precision through provider-derived sums."""
+    with localcontext() as context:
+        context.prec = max(28, sum(len(value.as_tuple().digits) for value in values) + 4)
+        return sum(values, Decimal(0))
 
 
 @dataclass(frozen=True)

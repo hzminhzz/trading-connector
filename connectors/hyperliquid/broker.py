@@ -116,7 +116,13 @@ class HyperliquidLiveBroker:
 
     async def get_position_async(self, asset: str) -> Position | None:
         await self._sync_positions()
-        return self._positions.get(asset) or self._positions.get(self._normalize_symbol(asset))
+        if asset in self._positions:
+            return self._positions[asset]
+        candidates = [pos for symbol, pos in self._positions.items()
+                      if self._normalize_symbol(symbol) == asset]
+        if len(candidates) > 1:
+            raise ValueError("Ambiguous Hyperliquid position alias")
+        return candidates[0] if candidates else None
 
     async def get_pending_orders_async(self, asset: str | None = None) -> list[Order]:
         await self._sync_orders(asset)
@@ -300,10 +306,7 @@ class HyperliquidLiveBroker:
             self._account_value = float(usdc_bal.total)
             self._cash = float(usdc_bal.free)
         else:
-            total_val = sum(float(b.total) for b in balances.values())
-            free_val = sum(float(b.free) for b in balances.values())
-            self._account_value = total_val
-            self._cash = free_val
+            raise ValueError("Hyperliquid USDC account balance unverified")
 
     async def _sync_positions(self) -> None:
         if not self.client.config.wallet_address or not self.client.config.private_key:
@@ -314,8 +317,12 @@ class HyperliquidLiveBroker:
             qty = float(p.size)
             if p.side == "sell" or p.side == "short":
                 qty = -abs(qty)
-            entry_px = float(p.entry_price) if p.entry_price is not None else 0.0
-            cur_px = float(p.mark_price) if p.mark_price is not None else entry_px
+            if p.side not in ("long", "short", "buy", "sell"):
+                raise ValueError("Unsupported Hyperliquid native position side")
+            if p.entry_price is None or p.mark_price is None:
+                raise ValueError("Missing Hyperliquid active position price")
+            entry_px = float(p.entry_price)
+            cur_px = float(p.mark_price)
 
             pos = Position(
                 asset=p.symbol,
@@ -325,8 +332,7 @@ class HyperliquidLiveBroker:
                 entry_time=datetime.now(UTC),
             )
             new_positions[p.symbol] = pos
-            norm = self._normalize_symbol(p.symbol)
-            new_positions[norm] = pos
+            # Preserve the native symbol. An unverified alias is not a second position.
 
         self._positions = new_positions
 
@@ -353,7 +359,13 @@ class HyperliquidLiveBroker:
             "cancelled": OrderStatus.CANCELLED,
             "rejected": OrderStatus.REJECTED,
         }
-        order_status = status_map.get(o.status.lower(), OrderStatus.PENDING)
+        if o.side not in ("buy", "sell", "long", "short"):
+            raise ValueError("Unsupported Hyperliquid native order side")
+        if o.order_type not in ("limit", "market"):
+            raise ValueError("Unsupported Hyperliquid native order type")
+        if o.status.lower() not in status_map:
+            raise ValueError("Unsupported Hyperliquid native order status")
+        order_status = status_map[o.status.lower()]
 
         return Order(
             asset=asset,

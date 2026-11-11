@@ -29,6 +29,30 @@ from connectors.bybit.models import (
 logger = logging.getLogger(__name__)
 
 
+def _strict_decimal(value: object, field: str) -> Decimal:
+    """Reject absent, bool, malformed or non-finite provider finance."""
+    if value is None or isinstance(value, bool) or not isinstance(value, (str, int, float, Decimal)):
+        raise BybitError(f"Invalid provider {field}")
+    try:
+        result = Decimal(str(value))
+    except (ValueError, ArithmeticError) as exc:
+        raise BybitError(f"Invalid provider {field}") from exc
+    if not result.is_finite() or len(result.as_tuple().digits) > 256 or abs(result.as_tuple().exponent) > 1000:
+        raise BybitError(f"Invalid provider {field}")
+    return result
+
+
+def _required_text(value: object, field: str, allowed: tuple[str, ...] | None = None) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise BybitError(f"Invalid provider {field}")
+    normalized = value.strip().lower()
+    if allowed is not None and normalized not in allowed:
+        raise BybitError(f"Unsupported provider {field}")
+    return normalized
+
+
+
+
 class BybitClient:
     """Async client managing Bybit REST commands with strict error translation."""
 
@@ -322,19 +346,25 @@ class BybitClient:
         try:
             raw = await self._exchange.fetch_balance()
             balances: dict[str, BybitBalance] = {}
-            total = raw.get("total", {})
-            free = raw.get("free", {})
-            used = raw.get("used", {})
-
+            if not isinstance(raw, dict):
+                raise BybitError("Invalid balance response shape")
+            total, free, used = (raw.get(field) for field in ("total", "free", "used"))
+            if not all(isinstance(v, dict) for v in (total, free, used)):
+                raise BybitError("Incomplete provider balance inventory")
             for cur, tot_val in total.items():
-                if tot_val is not None and float(tot_val) > 0:
-                    balances[cur] = BybitBalance(
-                        currency=cur,
-                        total=Decimal(str(tot_val)),
-                        free=Decimal(str(free.get(cur, 0) or 0)),
-                        used=Decimal(str(used.get(cur, 0) or 0)),
-                        raw=raw,
-                    )
+                if not isinstance(cur, str) or not cur:
+                    raise BybitError("Invalid balance currency identity")
+                amount = _strict_decimal(tot_val, "balance.total")
+                available = _strict_decimal(free.get(cur), "balance.free")
+                committed = _strict_decimal(used.get(cur), "balance.used")
+                if amount < 0 or available < 0 or committed < 0:
+                    raise BybitError("Negative provider balance field")
+                balances[cur] = BybitBalance(
+                    currency=cur, total=amount, free=available,
+                    used=committed, raw=raw,
+                )
+            if set(free) != set(total) or set(used) != set(total):
+                raise BybitError("Inconsistent balance currency inventory")
             return balances
         except Exception as exc:
             raise self._wrap_exception(exc) from exc
@@ -347,32 +377,41 @@ class BybitClient:
         try:
             raw_positions = await self._exchange.fetch_positions(symbols)
             positions: list[BybitPositionData] = []
+            if not isinstance(raw_positions, list):
+                raise BybitError("Invalid positions response shape")
+            seen = set()
             for p in raw_positions:
+                if not isinstance(p, dict):
+                    raise BybitError("Invalid native position row")
                 contracts = p.get("contracts")
                 if contracts is None:
                     contracts = p.get("size")
-                if contracts is None:
-                    continue
-                size_dec = Decimal(str(contracts))
-                if size_dec <= Decimal(0):
-                    continue
+                size_dec = _strict_decimal(contracts, "position quantity")
+                if size_dec < 0:
+                    raise BybitError("Negative position quantity")
+                if size_dec == 0:
+                    continue  # Explicit zero is the only supported inactive row.
+                symbol = p.get("symbol")
+                _required_text(symbol, "position symbol")
+                side = _required_text(p.get("side"), "position side",
+                                      ("buy", "sell", "long", "short"))
+                key = (symbol, side)
+                if key in seen:
+                    raise BybitError("Duplicate active native position")
+                seen.add(key)
 
-                entry_px = Decimal(str(p["entryPrice"])) if p.get("entryPrice") is not None else None
-                mark_px = Decimal(str(p["markPrice"])) if p.get("markPrice") is not None else None
-                unrealized = Decimal(str(p["unrealizedPnl"])) if p.get("unrealizedPnl") is not None else None
-                leverage = Decimal(str(p["leverage"])) if p.get("leverage") is not None else None
-                liq_px = Decimal(str(p["liquidationPrice"])) if p.get("liquidationPrice") is not None else None
+                def optional_decimal(field):
+                    value = p.get(field)
+                    return _strict_decimal(value, field) if value is not None else None
 
                 positions.append(
                     BybitPositionData(
-                        symbol=p.get("symbol", ""),
-                        side=str(p.get("side", "long")).lower(),
-                        size=size_dec,
-                        entry_price=entry_px,
-                        mark_price=mark_px,
-                        unrealized_pnl=unrealized,
-                        leverage=leverage,
-                        liquidation_price=liq_px,
+                        symbol=symbol, side=side, size=size_dec,
+                        entry_price=optional_decimal("entryPrice"),
+                        mark_price=optional_decimal("markPrice"),
+                        unrealized_pnl=optional_decimal("unrealizedPnl"),
+                        leverage=optional_decimal("leverage"),
+                        liquidation_price=optional_decimal("liquidationPrice"),
                         raw=p,
                     )
                 )
@@ -388,20 +427,42 @@ class BybitClient:
         try:
             raw_orders = await self._exchange.fetch_open_orders(symbol)
             orders: list[BybitOrderData] = []
+            if not isinstance(raw_orders, list):
+                raise BybitError("Invalid open order response shape")
+            seen = set()
             for o in raw_orders:
+                if not isinstance(o, dict):
+                    raise BybitError("Invalid native order row")
+                order_id = o.get("id")
+                _required_text(order_id, "order identity")
+                # Provider IDs are opaque and may be case sensitive.
+                if order_id in seen:
+                    raise BybitError("Duplicate native open order")
+                seen.add(order_id)
+                native_symbol = o.get("symbol")
+                _required_text(native_symbol, "order symbol")
+                native_side = _required_text(o.get("side"), "order side", ("buy", "sell"))
+                native_type = _required_text(o.get("type"), "order type",
+                                             ("market", "limit"))
+                native_status = _required_text(o.get("status"), "order status",
+                                               ("open", "new", "partially_filled"))
+                amount = _strict_decimal(o.get("amount"), "order quantity")
+                filled = _strict_decimal(o.get("filled"), "order filled")
+                if amount <= 0 or not 0 <= filled <= amount:
+                    raise BybitError("Inconsistent provider order quantity/fill")
+                if native_status == "partially_filled" and not 0 < filled < amount:
+                    raise BybitError("Inconsistent partial-fill state")
+                price = (_strict_decimal(o["price"], "order price")
+                         if o.get("price") is not None else None)
+                if native_type == "limit" and (price is None or price <= 0):
+                    raise BybitError("Missing valid limit order price")
                 orders.append(
                     BybitOrderData(
-                        order_id=str(o.get("id", "")),
-                        client_order_id=o.get("clientOrderId"),
-                        symbol=str(o.get("symbol", "")),
-                        side=str(o.get("side", "")).lower(),
-                        order_type=str(o.get("type", "")).lower(),
-                        price=Decimal(str(o["price"])) if o.get("price") is not None else None,
-                        quantity=Decimal(str(o.get("amount", 0) or 0)),
-                        filled_quantity=Decimal(str(o.get("filled", 0) or 0)),
-                        status=str(o.get("status", "")).lower(),
-                        timestamp=o.get("timestamp"),
-                        raw=o,
+                        order_id=order_id, client_order_id=o.get("clientOrderId"),
+                        symbol=native_symbol, side=native_side,
+                        order_type=native_type, price=price,
+                        quantity=amount, filled_quantity=filled,
+                        status=native_status, timestamp=o.get("timestamp"), raw=o,
                     )
                 )
             return orders
@@ -533,7 +594,8 @@ class BybitClient:
         """Maps CCXT exceptions to structured connector exceptions without leaking secrets."""
         if isinstance(exc, BybitError):
             return exc
-        msg = type(exc).__name__ if self.config.environment is Environment.DEMO else str(exc)
+        # CCXT errors may contain account bodies, URLs or credentials.
+        msg = type(exc).__name__
         if isinstance(exc, ccxt.AuthenticationError):
             return BybitAuthenticationError(f"Authentication failed: {msg}")
         if isinstance(exc, ccxt.RateLimitExceeded):

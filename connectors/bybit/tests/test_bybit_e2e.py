@@ -15,7 +15,7 @@ from connectors.bybit.broker import BybitLiveBroker
 from connectors.bybit.config import BybitConfig, Environment, Mode
 from connectors.bybit.feed import BybitKlineFeed
 from connectors.bybit.journal import BybitIntentJournal
-from connectors.bybit.models import BybitOrderData
+from connectors.bybit.models import BybitBalance, BybitOrderData
 
 
 class SmokeStrategy(Strategy):
@@ -68,7 +68,7 @@ def test_bybit_live_engine_shadow_e2e(tmp_path):
     mock_client.config = BybitConfig(Environment.TESTNET, Mode.SHADOW, api_key="k", api_secret="s")
     mock_client.connect = AsyncMock()
     mock_client.close = AsyncMock()
-    mock_client.fetch_balance = AsyncMock(return_value={})
+    mock_client.fetch_balance = AsyncMock(return_value={"USDT": BybitBalance("USDT", Decimal("5000"), Decimal("4500"), Decimal("500"), {})})
     mock_client.fetch_positions = AsyncMock(return_value=[])
     mock_client.fetch_open_orders = AsyncMock(return_value=[])
     mock_client.create_order = AsyncMock(return_value=BybitOrderData(

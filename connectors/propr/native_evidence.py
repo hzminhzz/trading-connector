@@ -121,8 +121,14 @@ async def inspect_native_evidence(rest: Any, *, account_id: str, endpoint: str,
 
     try:
         raw = await rest.request("GET", f"/accounts/{quote(account_id, safe='')}")
+        native = raw.get("data", raw) if isinstance(raw, dict) else None
+        if not isinstance(native, dict) or "accountId" not in native:
+            bound = False
+            reasons.append("ACCOUNT_SNAPSHOT_IDENTITY_UNATTESTED")
+            return result()
         financial = financial_from(raw, account_id, attempt)
     except (RemoteAPIError, ValueError, TypeError, KeyError):
+        bound = False
         reasons.append("ACCOUNT_FINANCIAL_INVALID")
         return result()
     native = raw.get("data", raw)

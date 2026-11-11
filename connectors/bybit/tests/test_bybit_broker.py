@@ -86,7 +86,7 @@ def test_broker_connect_syncs_state(broker, mock_client):
 
 
 def test_submit_order_market(broker, mock_client):
-    mock_client.fetch_balance.return_value = {}
+    mock_client.fetch_balance.return_value = {"USDT": BybitBalance("USDT", Decimal("5000"), Decimal("4500"), Decimal("500"), {})}
     mock_client.fetch_positions.return_value = []
     mock_client.fetch_open_orders.return_value = []
 
@@ -129,7 +129,7 @@ def test_submit_order_market(broker, mock_client):
 
 
 def test_replace_order(broker, mock_client):
-    mock_client.fetch_balance.return_value = {}
+    mock_client.fetch_balance.return_value = {"USDT": BybitBalance("USDT", Decimal("5000"), Decimal("4500"), Decimal("500"), {})}
     mock_client.fetch_positions.return_value = []
     mock_client.fetch_open_orders.return_value = [
         BybitOrderData(
@@ -176,7 +176,7 @@ def test_replace_order(broker, mock_client):
 
 
 def test_cancel_order(broker, mock_client):
-    mock_client.fetch_balance.return_value = {}
+    mock_client.fetch_balance.return_value = {"USDT": BybitBalance("USDT", Decimal("5000"), Decimal("4500"), Decimal("500"), {})}
     mock_client.fetch_positions.return_value = []
     mock_client.fetch_open_orders.return_value = [
         BybitOrderData(
@@ -205,7 +205,7 @@ def test_cancel_order(broker, mock_client):
 
 
 def test_close_position(broker, mock_client):
-    mock_client.fetch_balance.return_value = {}
+    mock_client.fetch_balance.return_value = {"USDT": BybitBalance("USDT", Decimal("5000"), Decimal("4500"), Decimal("500"), {})}
     mock_client.fetch_positions.return_value = [
         BybitPositionData(
             symbol="BTC/USDT:USDT",
@@ -295,7 +295,7 @@ def test_fail_closed_gate_on_unreconciled_intent(broker, mock_client):
             timestamp=1700000000000,
             raw={},
         )
-        mock_client.fetch_balance.return_value = {}
+        mock_client.fetch_balance.return_value = {"USDT": BybitBalance("USDT", Decimal("5000"), Decimal("4500"), Decimal("500"), {})}
         mock_client.fetch_positions.return_value = []
         mock_client.fetch_open_orders.return_value = []
 

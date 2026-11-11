@@ -80,7 +80,7 @@ def test_broker_connect_syncs_state(broker, mock_client):
         # Positions
         positions = await broker.get_positions_async()
         assert "BTC/USDC:USDC" in positions
-        assert "BTC/USDC" in positions
+        assert "BTC/USDC" not in positions  # No synthetic alias entry
         pos = await broker.get_position_async("BTC/USDC")
         assert pos is not None
         assert pos.quantity == 0.10
@@ -93,7 +93,7 @@ def test_broker_connect_syncs_state(broker, mock_client):
 
 
 def test_submit_order_market(broker, mock_client):
-    mock_client.fetch_balance.return_value = {}
+    mock_client.fetch_balance.return_value = {"USDC": HyperliquidBalance("USDC", Decimal("10000"), Decimal("8000"), Decimal("2000"), {})}
     mock_client.fetch_positions.return_value = []
     mock_client.fetch_open_orders.return_value = []
 
@@ -144,7 +144,7 @@ def test_submit_order_market(broker, mock_client):
 
 
 def test_replace_order(broker, mock_client):
-    mock_client.fetch_balance.return_value = {}
+    mock_client.fetch_balance.return_value = {"USDC": HyperliquidBalance("USDC", Decimal("10000"), Decimal("8000"), Decimal("2000"), {})}
     mock_client.fetch_positions.return_value = []
     mock_client.fetch_open_orders.return_value = [
         HyperliquidOrderData(
@@ -191,7 +191,7 @@ def test_replace_order(broker, mock_client):
 
 
 def test_cancel_order(broker, mock_client):
-    mock_client.fetch_balance.return_value = {}
+    mock_client.fetch_balance.return_value = {"USDC": HyperliquidBalance("USDC", Decimal("10000"), Decimal("8000"), Decimal("2000"), {})}
     mock_client.fetch_positions.return_value = []
     mock_client.fetch_open_orders.return_value = [
         HyperliquidOrderData(
@@ -305,7 +305,7 @@ def test_fail_closed_gate_on_unreconciled_intent(broker, mock_client):
             timestamp=1700000000000,
             raw={},
         )
-        mock_client.fetch_balance.return_value = {}
+        mock_client.fetch_balance.return_value = {"USDC": HyperliquidBalance("USDC", Decimal("10000"), Decimal("8000"), Decimal("2000"), {})}
         mock_client.fetch_positions.return_value = []
         mock_client.fetch_open_orders.return_value = []
 

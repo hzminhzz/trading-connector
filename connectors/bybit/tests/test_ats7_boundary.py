@@ -8,7 +8,7 @@ import pytest
 from connectors.bybit.broker import BybitLiveBroker
 from connectors.bybit.config import BybitConfig, Environment, Mode
 from connectors.bybit.journal import BybitIntentJournal, UnknownOutcome
-from connectors.bybit.models import BybitOrderData
+from connectors.bybit.models import BybitBalance, BybitOrderData
 
 
 def fixture(tmp_path):
@@ -17,7 +17,7 @@ def fixture(tmp_path):
     for name in ("connect", "close", "fetch_balance", "fetch_positions", "fetch_open_orders",
                  "create_order", "cancel_order"):
         setattr(client, name, AsyncMock())
-    client.fetch_balance.return_value = {}
+    client.fetch_balance.return_value = {"USDT": BybitBalance("USDT", Decimal("5000"), Decimal("4500"), Decimal("500"), {})}
     client.fetch_positions.return_value = []
     client.fetch_open_orders.return_value = []
     client.create_order.return_value = BybitOrderData(

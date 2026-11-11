@@ -15,7 +15,7 @@ from connectors.hyperliquid.broker import HyperliquidLiveBroker
 from connectors.hyperliquid.config import Environment, HyperliquidConfig, Mode
 from connectors.hyperliquid.feed import HyperliquidKlineFeed
 from connectors.hyperliquid.journal import HyperliquidIntentJournal
-from connectors.hyperliquid.models import HyperliquidOrderData
+from connectors.hyperliquid.models import HyperliquidBalance, HyperliquidOrderData
 
 
 class SmokeStrategy(Strategy):
@@ -69,7 +69,7 @@ def test_hyperliquid_live_engine_shadow_e2e(tmp_path):
     )
     mock_client.connect = AsyncMock()
     mock_client.close = AsyncMock()
-    mock_client.fetch_balance = AsyncMock(return_value={})
+    mock_client.fetch_balance = AsyncMock(return_value={"USDC": HyperliquidBalance("USDC", Decimal("5000"), Decimal("4500"), Decimal("500"), {})})
     mock_client.fetch_positions = AsyncMock(return_value=[])
     mock_client.fetch_open_orders = AsyncMock(return_value=[])
     mock_client.create_order = AsyncMock(return_value=HyperliquidOrderData(
