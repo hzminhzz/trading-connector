@@ -23,10 +23,10 @@ Date: 2026-11-11. Parent: [trading-connector #22](https://github.com/hzminhzz/tr
 | #25 Bybit | MERGED_ENGINEERING_VERIFIED | PR #32; missing finance/positions/order states reject, no inferred cash; strict DEMO path retained | Generic ML4T DEMO cash preflight must remain blocked until a separately attested cash contract exists |
 | #26 Hyperliquid | MERGED_ENGINEERING_VERIFIED | PR #32; native symbols, no duplicate alias inventory, no mixed-currency cash, strict state | No venue-authenticated live reconciliation authorized |
 | #27 MyFundedPerps | DRAFT_VERIFIED_LOCAL | 117 non-Pydantic draft tests under Python 3.13, strict policy flags and pagination | Draft unpublished; independent provider docs/credentialed proof not completed |
-| #28 Vanta | DRAFT_VERIFIED_LOCAL | 86 synthetic draft tests under Python 3.13; signed GET/POST fixture HMAC, exact Decimal JSON numbers, Unicode nested encoding, dispatch-denial | Independent live documentation verification and credentialed read-only validation unavailable; dispatch stays denied |
+| #28 Vanta | DRAFT_VERIFIED_LOCAL / OFFICIAL_DOCS_MATCH | 86 synthetic draft tests under Python 3.13; signed GET/POST fixture HMAC matches official published examples, exact Decimal JSON numbers, Unicode nested encoding, dispatch denial | No credentialed account read or integration; dispatch remains denied |
 | #29 Pydantic pilot | PILOT_VERIFIED_LOCAL — KEEP STDLIB | 48 pilot tests under Python 3.13, pinned Pydantic 2.12.5 / pydantic-core 2.41.5 | Pilot deliberately not a package dependency or public API |
 | #30 Guardian | MERGED_ENGINEERING_VERIFIED | PR #46; independent exact pinned-package 3.13/3.14 tests and lockfile consistency | Operational rollout not performed |
-| #31 Final integration | ACCEPTED_SEAMS_VERIFIED; OTHER GAPS OPEN | This record; merged code and tested pin, draft isolation, rollback below | Final provider-draft scientific/operational qualification remains explicitly out of scope |
+| #31 Final integration | ENGINEERING_VERIFIED scoped release decision | This record; merged code and tested pin, draft isolation, official Vanta contract check, rollback below | Provider-draft activation and scientific/operational qualification remain explicitly out of scope |
 
 ## Executable test receipts
 
@@ -61,7 +61,7 @@ Isolated draft execution:
 uv run --python 3.13 --no-project --with pytest==8.4.2 --with httpx --with websockets --with python-dotenv --with pydantic==2.12.5 python -m pytest -q connectors/myfundedperpetuals/tests connectors/vanta/tests
 ```
 
-**251 passed** per Python version on 3.11, 3.12, 3.13 and 3.14. Separately on 3.13: MyFundedPerps standard-library tests 117 pass, Vanta tests 86 pass, Pydantic pilot 48 pass. Draft Ruff passes. Results are synthetics; exact vendor signatures are only established relative to existing checked-in fixture vectors, not independently verified provider network authority.
+**251 passed** per Python version on 3.11, 3.12, 3.13 and 3.14. Separately on 3.13: MyFundedPerps standard-library tests 117 pass, Vanta tests 86 pass, Pydantic pilot 48 pass. Draft Ruff passes. The test runs are synthetic; Vanta's fixed signature vectors were separately matched to independently retrieved official authentication examples. No credentialed order/read execution occurred.
 
 ## Pydantic v2 comparison (one synthetic representative seam)
 
@@ -76,8 +76,12 @@ On the exact long JSON fractional-number fixture, `PilotNumeric.model_validate_j
 - Preserve unknown Propr ledger cash, provider history cutoff and non-authoritative paginated inventory; Bybit Demo `available_usd` is *buying power*, never a substitute for ledger cash in a generic ML4T `get_cash_async()` result. Consequently its generic preflight can refuse to run; do not bypass that refusal.
 - Provider IDs are opaque and case-preserved; unknown statuses and malformed values reject rather than becoming PENDING, flat, safe zero or trusted account identity.
 - To roll back **without rewinding journal state**, pin Guardian's connector SHA in all three surfaces back to `2db29b50af301741821781dedf64e4d8194fc125`, run `uv lock`, verify clean tests and release gates, and redeploy only after separate runtime change authorization. The previous Guardian source revision was `ffbd3a1`; its historical manifest/lock is the rollback reference. Do **not** reset Guardian SQLite or production journals, change risk trust thresholds, or activate trading as part of rollback.
-- No deployment receipt, running process revision, venue replay, real credentials, full provider documentation or OOS trading evidence was obtained in this mission. All claims are engineering/synthetic only.
+- No deployment receipt, running process revision, venue replay, real provider credentials or OOS trading evidence was obtained in this mission. Official Vanta documentation was read without authentication; all runtime/account claims remain synthetic only.
+
+## Independent Vanta documentation cross-check (read-only)
+
+On 2026-11-11 the official [OpenAPI v1.4.0](https://app.vantatrading.io/docs/openapi.json) and [authentication guide](https://app.vantatrading.io/docs/authentication) were downloaded with credential-free HTTPS GET from the VPS. OpenAPI SHA-256: `d162d3162d29ef143adabde71a9be2fa270c2acbd7496f6a71ee57153daf29db`; authentication HTML SHA-256: `42f9a4766f497e428cd01ba0fc3a09db0637e8c2170e089ace3edcbf1f8dde1d`. The provider documents the canonical payload as newline-joined `v1`, uppercase HTTP method, path plus query, millisecond timestamp, nonce and SHA-256 hex of the *exact request body*, signed with base64 HMAC-SHA256 and a `v1=` prefix. Both official example signatures (`ARXQ6aQCU4GUl47DNcQOJVW0miSfhgWdlfufJHWHRdE=` and `1/Oq1TQAeJehKvyAoHCq8DIE+8dAqkXYHIyvO3/17Q4=`) appear in the official authentication guide and match independently executable golden tests. This verifies documented signing syntax, not any live trading account or successful network mutation.
 
 ## Remaining boundaries
 
-Independent Propr and Vanta provider attestation, live contract interpretation, order-outcome recovery beyond mocked fixtures, account-level cash/equity proof, all missing/pagination provider-history semantics and operational release are separate evidence gates. Maintain NO-GO until explicitly verified. Research comparisons and draft prototype microbenchmarks cannot establish a production SLA or actual executable follower PnL.
+Independent Propr account attestation and credentialed Vanta account inspection, live contract interpretation, order-outcome recovery beyond mocked fixtures, account-level cash/equity proof, all missing/pagination provider-history semantics and operational release are separate evidence gates. Maintain NO-GO until explicitly verified. Research comparisons and draft prototype microbenchmarks cannot establish a production SLA or actual executable follower PnL.
