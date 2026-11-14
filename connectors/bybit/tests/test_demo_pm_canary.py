@@ -350,7 +350,7 @@ def test_canary_run_preflight_only_and_verify_existing_guards(tmp_path, monkeypa
     monkeypatch.setenv("BYBIT_MODE", "read_only")
     monkeypatch.setenv("BYBIT_DEMO_API_KEY", "demo-key")
     monkeypatch.setenv("BYBIT_DEMO_API_SECRET", "demo-secret")
-    monkeypatch.setenv("BYBIT_EXPECTED_DEMO_UID", "demo-uid")
+    monkeypatch.setenv("BYBIT_DEMO_EXPECTED_UID", "demo-uid")
 
     fake_client = MagicMock()
     fake_client.connect = AsyncMock()
