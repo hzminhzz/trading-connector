@@ -3,14 +3,18 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+import json
+import os
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from connectors.bybit.client import BybitClient
 from connectors.bybit.config import BybitConfig, Environment, Mode
+from connectors.bybit.examples import demo_pm_canary
 from connectors.bybit.examples.demo_pm_canary import (
     assert_demo_config,
     claim_once,
@@ -18,11 +22,14 @@ from connectors.bybit.examples.demo_pm_canary import (
     diagnostic_pm_report,
     fetch_trade_fills,
     reconcile_verified_fill,
+    scoped_position,
     validate_demo_preflight,
     validate_demo_target,
+    verify_existing,
 )
 from connectors.bybit.hyperliquid_portfolio import shadow_target_preview
 from connectors.bybit.journal import BybitIntentJournal
+from connectors.bybit.tests.conftest import make_linear_perp_market
 
 
 def config(env=Environment.DEMO, mode=Mode.READ_ONLY):
@@ -106,28 +113,7 @@ def test_pm_real_engine_produces_bounded_demo_target(tmp_path):
     assert report["authorized_for_live"] is False
     plan = shadow_target_preview(
         report,
-        {
-            "XRP/USDT:USDT": {
-                "symbol": "XRP/USDT:USDT",
-                "id": "XRPUSDT",
-                "base": "XRP",
-                "quote": "USDT",
-                "settle": "USDT",
-                "linear": True,
-                "swap": True,
-                "active": True,
-                "info": {
-                    "status": "Trading",
-                    "contractType": "LinearPerpetual",
-                    "lotSizeFilter": {
-                        "qtyStep": "0.1",
-                        "minOrderQty": "1",
-                        "minNotionalValue": "5",
-                    },
-                    "priceFilter": {"tickSize": "0.0001"},
-                },
-            }
-        },
+        {"XRP/USDT:USDT": make_linear_perp_market("XRP")},
         {"XRP/USDT:USDT": "1.25"},
         {"hyperliquid/mainnet:perp:default/XRP": "1.25"},
         gross_cap_usd=Decimal("5000"),
@@ -162,9 +148,14 @@ def test_target_notional_above_25_is_rejected():
         validate_demo_target(plan, mapping())
 
 
+def _demo_execution_client(**mock_kwargs):
+    exchange = MagicMock()
+    exchange.private_get_v5_execution_list = AsyncMock(**mock_kwargs)
+    return BybitClient(config(Environment.DEMO, Mode.EXECUTION), exchange=exchange)
+
+
 def test_independent_fill_list_ignores_unrelated_order_ids():
-    client = MagicMock()
-    client.exchange.private_get_v5_execution_list = AsyncMock(
+    client = _demo_execution_client(
         return_value={
             "retCode": 0,
             "result": {
@@ -185,7 +176,6 @@ def test_independent_fill_list_ignores_unrelated_order_ids():
             },
         }
     )
-    client._v5_result = lambda value, _: value["result"]
     result = asyncio.run(fetch_trade_fills(client, "XRPUSDT", "expected"))
     assert result["execution_rows"] == 1
     assert result["filled_quantity"] == "10"
@@ -230,8 +220,7 @@ def test_independent_fill_list_ignores_unrelated_order_ids():
     ],
 )
 def test_independent_execution_rejects_truncated_or_duplicate_evidence(extra, expected):
-    client = MagicMock()
-    client.exchange.private_get_v5_execution_list = AsyncMock(
+    client = _demo_execution_client(
         return_value={
             "retCode": 0,
             "result": {
@@ -247,14 +236,12 @@ def test_independent_execution_rejects_truncated_or_duplicate_evidence(extra, ex
             },
         }
     )
-    client._v5_result = lambda value, _: value["result"]
     with pytest.raises(RuntimeError, match=expected):
         asyncio.run(fetch_trade_fills(client, "XRPUSDT", "expected"))
 
 
 def test_independent_execution_reads_all_pages_before_certifying_fill():
-    client = MagicMock()
-    client.exchange.private_get_v5_execution_list = AsyncMock(
+    client = _demo_execution_client(
         side_effect=[
             {
                 "retCode": 0,
@@ -292,7 +279,6 @@ def test_independent_execution_reads_all_pages_before_certifying_fill():
             },
         ]
     )
-    client._v5_result = lambda value, _: value["result"]
     result = asyncio.run(fetch_trade_fills(client, "XRPUSDT", "expected"))
     assert result["execution_rows"] == 2
     assert result["pages_scanned"] == 2
@@ -314,16 +300,10 @@ def test_intent_journal_only_settles_after_exact_independent_execution(tmp_path)
     journal.mark_submitted(record.id, "v5-order-1")
     with pytest.raises(ValueError, match="QUANTITY_NOT_EXACT"):
         reconcile_verified_fill(journal, "v5-order-1", Decimal("11"))
-    assert (
-        journal.connection.execute("SELECT state FROM intents").fetchone()[0]
-        == "submitted"
-    )
+    assert journal.get(record.id).state == "submitted"
     reconcile_verified_fill(journal, "v5-order-1", Decimal("12"))
     reconcile_verified_fill(journal, "v5-order-1", Decimal("12"))
-    assert (
-        journal.connection.execute("SELECT state FROM intents").fetchone()[0]
-        == "filled"
-    )
+    assert journal.get(record.id).state == "filled"
     with pytest.raises(ValueError, match="NOT_UNIQUE"):
         reconcile_verified_fill(journal, "nonexistent-order", Decimal("12"))
     journal.close()
@@ -332,3 +312,70 @@ def test_intent_journal_only_settles_after_exact_independent_execution(tmp_path)
 def test_invalid_decimal_fails_closed():
     with pytest.raises(ValueError, match="NONFINITE"):
         decimal("NaN")
+
+
+def test_preflight_rejects_stale_ticker_and_unfunded_usd():
+    payload = preflight_kwargs()
+    stale_ts = int((payload["now"] - timedelta(seconds=121)).timestamp() * 1000)
+    payload["ticker_timestamp"] = stale_ts
+    with pytest.raises(ValueError, match="DEMO_TICKER_STALE"):
+        validate_demo_preflight(**payload)
+
+    unfunded = preflight_kwargs()
+    unfunded["account"] = SimpleNamespace(equity_usd=Decimal("100"), available_usd=Decimal("49.99"))
+    with pytest.raises(PermissionError, match="DEMO_ACCOUNT_UNFUNDED_OR_INSUFFICIENT"):
+        validate_demo_preflight(**unfunded)
+
+
+def test_scoped_position_handles_flat_signed_and_unexpected_positions():
+    client = MagicMock()
+    client.fetch_demo_positions = AsyncMock(return_value=[])
+    assert asyncio.run(scoped_position(client)) == Decimal(0)
+
+    client.fetch_demo_positions = AsyncMock(
+        return_value=[SimpleNamespace(symbol="XRP/USDT:USDT", side="sell", size=Decimal("12"))]
+    )
+    assert asyncio.run(scoped_position(client)) == Decimal("-12")
+
+    client.fetch_demo_positions = AsyncMock(
+        return_value=[SimpleNamespace(symbol="BTC/USDT:USDT", side="buy", size=Decimal("0.01"))]
+    )
+    with pytest.raises(RuntimeError, match="UNRELATED_DEMO_POSITION_APPEARED"):
+        asyncio.run(scoped_position(client))
+
+
+def test_canary_run_preflight_only_and_verify_existing_guards(tmp_path, monkeypatch):
+    pytest.importorskip("copytrade_pm.pm_combo2")
+    monkeypatch.setenv("BYBIT_ENVIRONMENT", "demo")
+    monkeypatch.setenv("BYBIT_MODE", "read_only")
+    monkeypatch.setenv("BYBIT_DEMO_API_KEY", "demo-key")
+    monkeypatch.setenv("BYBIT_DEMO_API_SECRET", "demo-secret")
+    monkeypatch.setenv("BYBIT_EXPECTED_DEMO_UID", "demo-uid")
+
+    fake_client = MagicMock()
+    fake_client.connect = AsyncMock()
+    fake_client.close = AsyncMock()
+    fake_client.demo_identity_evidence = preflight_kwargs()["identity"]
+    fake_client.fetch_demo_account_summary = AsyncMock(
+        return_value=SimpleNamespace(equity_usd=Decimal("10000"), available_usd=Decimal("1000"))
+    )
+    fake_client.fetch_demo_positions = AsyncMock(return_value=[])
+    fake_client.fetch_demo_open_orders = AsyncMock(return_value=[])
+    fake_client.exchange = MagicMock()
+    fake_client.exchange.markets = {"XRP/USDT:USDT": make_linear_perp_market("XRP")}
+    fake_client.exchange.fetch_ticker = AsyncMock(return_value={"last": "1.25", "timestamp": None})
+    monkeypatch.setattr(demo_pm_canary, "BybitClient", lambda _cfg: fake_client)
+
+    report = asyncio.run(demo_pm_canary.run(execute=False, root=tmp_path))
+    assert report["status"] == "PREFLIGHT_ONLY"
+    assert report["order_mutations"] == 0
+    assert Decimal(report["target"]["quantity"]) == Decimal("12")
+
+    # verify_existing fails closed when directory permissions or parent root are invalid
+    bad_dir = tmp_path / "run1"
+    bad_dir.mkdir(mode=0o700)
+    (bad_dir / "report.json").write_text(json.dumps({"status": "BROKEN"}))
+    os.chmod(bad_dir / "report.json", 0o600)
+    monkeypatch.setattr(demo_pm_canary, "PRIVATE_ROOT", tmp_path)
+    with pytest.raises(ValueError, match="UNVERIFIED_CANARY_REPORT"):
+        asyncio.run(verify_existing(bad_dir))

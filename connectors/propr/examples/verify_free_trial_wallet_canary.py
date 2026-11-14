@@ -11,14 +11,17 @@ import asyncio
 from decimal import Decimal
 from hashlib import sha256
 import json
-import os
 from pathlib import Path
 import sqlite3
-import stat
 from urllib.parse import quote
 
+from connectors.propr.examples._trial_common import (
+    parse_decimal,
+    read_private_bytes,
+    require_propr_live_secret,
+    write_private_json,
+)
 from connectors.propr.rest import ProprRest
-from connectors.propr.examples.free_trial_wallet_canary import _d, _read_private
 
 
 def evaluate(
@@ -51,21 +54,21 @@ def evaluate(
             or row.get("side") != side
             or row.get("reduceOnly") is not reduction
             or row.get("status") != "filled"
-            or _d(row["cumulativeQuantity"]) != Decimal("0.2")
+            or parse_decimal(row["cumulativeQuantity"]) != Decimal("0.2")
             or journal_states.get(item["id"]) != "filled"
         ):
             raise ValueError("BROKER_ORDER_STATUS_OR_JOURNAL_MISMATCH")
     if len(fills) != 2 or {f.get("orderId") for f in fills} != set(order_by_id):
         raise ValueError("BROKER_FILLS_INCOMPLETE")
     for fill in fills:
-        if _d(fill["quantity"]) != Decimal("0.2") or fill.get("asset") != "HYPE":
+        if parse_decimal(fill["quantity"]) != Decimal("0.2") or fill.get("asset") != "HYPE":
             raise ValueError("BROKER_FILL_QUANTITY_MISMATCH")
     if active_positions or active_orders:
         raise ValueError("CANARY_ACCOUNT_NOT_FLAT_OR_ORDER_PENDING")
-    fees = sum((_d(f["fee"]) for f in fills), Decimal("0"))
-    realized = sum((_d(f["realizedPnl"]) for f in fills), Decimal("0"))
-    pre = _d(audit["preflight"]["balance"])
-    after = _d(account["balance"])
+    fees = sum((parse_decimal(f["fee"]) for f in fills), Decimal("0"))
+    realized = sum((parse_decimal(f["realizedPnl"]) for f in fills), Decimal("0"))
+    pre = parse_decimal(audit["preflight"]["balance"])
+    after = parse_decimal(account["balance"])
     net = realized - fees
     if pre + net != after:
         raise ValueError("CANARY_BALANCE_PNL_RECONCILIATION_MISMATCH")
@@ -78,10 +81,10 @@ def evaluate(
         "opening_order_id": opening["order_id"],
         "closing_order_id": closing["order_id"],
         "opening_fill_price": str(
-            _d(order_by_id[opening["order_id"]]["averageFillPrice"])
+            parse_decimal(order_by_id[opening["order_id"]]["averageFillPrice"])
         ),
         "closing_fill_price": str(
-            _d(order_by_id[closing["order_id"]]["averageFillPrice"])
+            parse_decimal(order_by_id[closing["order_id"]]["averageFillPrice"])
         ),
         "buy_quantity": "0.2",
         "sell_quantity": "0.2",
@@ -130,7 +133,7 @@ async def read_venue(account_id: str, api_key: str, audit: dict):
             params={"status": "open", "limit": 100, "offset": 0},
         )
         positions = [
-            row for row in pos.get("data", pos) if _d(row.get("quantity", "0")) > 0
+            row for row in pos.get("data", pos) if parse_decimal(row.get("quantity", "0")) > 0
         ]
         pending = []
         for state in ("pending", "open", "partially_filled"):
@@ -153,17 +156,12 @@ def run(private_root: Path, account_id: str, env_path: Path) -> dict:
     if not account_id.endswith("JhW9"):
         raise ValueError("FREE_TRIAL_ACCOUNT_BINDING_MISMATCH")
     report_path = private_root / "report.json"
-    payload = _read_private(report_path)
+    payload = read_private_bytes(report_path)
     audit = json.loads(payload)
     verified_path = private_root / "venue-reconciliation.json"
     if verified_path.exists() or verified_path.is_symlink():
         raise ValueError("IMMUTABLE_VENUE_RECONCILIATION_ALREADY_EXISTS")
-    from dotenv import dotenv_values
-
-    secrets = dotenv_values(env_path)
-    key = secrets.get("PROPR_LIVE_API_KEY") or secrets.get("PROPR_API_KEY")
-    if not key or not key.startswith("pk_live_"):
-        raise ValueError("MISSING_PROPR_READ_ONLY_KEY")
+    key = require_propr_live_secret(env_path, missing_error="MISSING_PROPR_READ_ONLY_KEY")
     journal_path = private_root / "intents.sqlite"
     if journal_path.is_symlink() or journal_path.stat().st_mode & 0o077:
         raise ValueError("JOURNAL_NOT_PRIVATE")
@@ -175,9 +173,7 @@ def run(private_root: Path, account_id: str, env_path: Path) -> dict:
     )
     result = evaluate(audit, account, orders, fills, positions, pending, journal_states)
     result["local_canary_report_sha256"] = sha256(payload).hexdigest()
-    with verified_path.open("x") as stream:
-        json.dump(result, stream, indent=2, sort_keys=True)
-    os.chmod(verified_path, stat.S_IRUSR | stat.S_IWUSR)
+    write_private_json(verified_path, result, exclusive=True)
     return result
 
 

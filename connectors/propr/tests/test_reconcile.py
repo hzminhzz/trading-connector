@@ -2,18 +2,13 @@ import asyncio
 import pytest
 from connectors.propr.reconcile import AccountReconciler
 from connectors.propr.state import IntentJournal, UnknownOutcome
+from connectors.propr.tests.conftest import FakeReader
 
-class Reader:
-    def __init__(self):
-        self.calls = 0
-    async def snapshot(self):
-        self.calls += 1
-        return {"orders": [], "positions": [], "trades": []}
 
 def test_reconnect_duplicate_event_and_stale(tmp_path):
     journal = IntentJournal(tmp_path / "j.db")
     clock = [0.0]
-    reader = Reader()
+    reader = FakeReader()
     r = AccountReconciler(reader, journal, stale_after=5, clock=lambda: clock[0])
     async def run():
         with pytest.raises(UnknownOutcome):
@@ -44,13 +39,13 @@ def test_reconnect_duplicate_event_and_stale(tmp_path):
         assert r.rest_consistent and not r.ready
         with pytest.raises(UnknownOutcome):
             r.assert_opening_safe()
-        assert reader.calls == 6
+        assert reader.count == 6
     asyncio.run(run())
     journal.close()
 
 def test_unknown_intent_blocks_snapshot(tmp_path):
     journal = IntentJournal(tmp_path / "j.db")
-    reader = Reader()
+    reader = FakeReader()
     r = AccountReconciler(reader, journal)
     r.connected_unverified()
     intent = journal.stage("a", "BTC", "buy", "long", "1")

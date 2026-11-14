@@ -1,6 +1,6 @@
 """Typed Propr native snapshots; opaque IDs and Decimal values survive mapping."""
 from dataclasses import dataclass
-from decimal import Decimal, localcontext
+from decimal import Decimal
 from enum import Enum
 
 
@@ -13,28 +13,6 @@ class OrderStatus(str, Enum):
     REJECTED = "rejected"
     EXPIRED = "expired"
     UNKNOWN = "unknown"
-
-
-def finite_decimal(value: object) -> Decimal:
-    if isinstance(value, bool) or not isinstance(value, (str, int, float, Decimal)):
-        raise ValueError("Invalid provider decimal")
-    try:
-        result = Decimal(str(value))
-    except Exception as exc:
-        raise ValueError("Invalid provider decimal") from exc
-    if not result.is_finite():
-        raise ValueError("Provider decimal must be finite")
-    digits = result.as_tuple().digits
-    if len(digits) > 256 or abs(result.as_tuple().exponent) > 1000:
-        raise ValueError("Provider decimal exceeds bounded precision or exponent")
-    return result
-
-
-def exact_decimal_sum(*values: Decimal) -> Decimal:
-    """Preserve monetary wire precision through provider-derived sums."""
-    with localcontext() as context:
-        context.prec = max(28, sum(len(value.as_tuple().digits) for value in values) + 4)
-        return sum(values, Decimal(0))
 
 
 @dataclass(frozen=True)
@@ -92,6 +70,26 @@ class Position:
             raise ValueError("Invalid position quantity")
         if self.margin_mode is not None and self.margin_mode not in ("cross", "isolated"):
             raise ValueError("Invalid margin mode")
+
+
+def is_valid_account_id(account_id: object) -> bool:
+    """Return True when account_id is a non-empty string without path separators."""
+    return isinstance(account_id, str) and bool(account_id.strip()) and "/" not in account_id
+
+
+def validate_account_id(
+    account_id: object,
+    *,
+    allow_none: bool = False,
+    message: str = "Invalid account ID",
+) -> str | None:
+    """Validate an account ID boundary value and fail closed with ValueError."""
+    if account_id is None and allow_none:
+        return None
+    if not is_valid_account_id(account_id):
+        raise ValueError(message)
+    assert isinstance(account_id, str)
+    return account_id
 
 
 def one_way_positions(positions):

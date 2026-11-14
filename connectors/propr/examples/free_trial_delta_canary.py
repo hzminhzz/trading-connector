@@ -17,11 +17,16 @@ import os
 from pathlib import Path
 import sqlite3
 import stat
-from time import sleep
 
-from connectors.propr.examples.free_trial_wallet_canary import (
-    _d,
+from connectors.common.intents import open_wal_sqlite
+from connectors.common.validation import parse_utc_iso
+from connectors.propr.examples._trial_common import (
     check_trial,
+    parse_decimal,
+    poll_positions,
+    require_propr_live_secret,
+    submit_trial_order,
+    write_private_json,
 )
 from connectors.propr.state import IntentJournal
 
@@ -42,10 +47,7 @@ TRUSTED_CAPTURE_ROOT = (
 
 
 def _when(value: str) -> datetime:
-    dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    if dt.tzinfo is None:
-        raise ValueError("SIGNAL_TIMESTAMP_MUST_BE_UTC")
-    return dt.astimezone(UTC)
+    return parse_utc_iso(value, "signal_timestamp")
 
 
 def eligible_signal(signal: dict, now: datetime, reference_price: Decimal) -> dict:
@@ -74,9 +76,9 @@ def eligible_signal(signal: dict, now: datetime, reference_price: Decimal) -> di
         seconds=DEADLINE_SECONDS
     ):
         raise ValueError("SOURCE_SIGNAL_NOT_DUE_OR_EXPIRED")
-    previous = _d(signal["signed_quantity_before"])
-    after = _d(signal["signed_quantity_after"])
-    delta = _d(signal["signed_delta"])
+    previous = parse_decimal(signal["signed_quantity_before"])
+    after = parse_decimal(signal["signed_quantity_after"])
+    delta = parse_decimal(signal["signed_delta"])
     if delta != after - previous or delta == 0:
         raise ValueError("INCONSISTENT_SIGNED_SOURCE_DELTA")
     direction = "long" if signal["change_kind"].endswith("LONG") else "short"
@@ -90,7 +92,7 @@ def eligible_signal(signal: dict, now: datetime, reference_price: Decimal) -> di
         or (signal["change_kind"].startswith("OPEN") and previous != 0)
     ):
         raise ValueError("SOURCE_DELTA_DIRECTION_INVALID")
-    price = _d(reference_price)
+    price = parse_decimal(reference_price)
     if price <= 0:
         raise ValueError("INVALID_REFERENCE_PRICE")
     quantity = min(
@@ -128,9 +130,9 @@ class ClaimStore:
             or (path.exists() and (path.is_symlink() or path.stat().st_mode & 0o077))
         ):
             raise ValueError("PRIVATE_CANARY_CLAIM_STORE_REQUIRED")
-        self.connection = sqlite3.connect(path, timeout=10, isolation_level=None)
-        self.connection.execute("PRAGMA journal_mode=WAL")
-        self.connection.execute("PRAGMA synchronous=FULL")
+        self.connection = open_wal_sqlite(
+            path, synchronous="FULL", timeout=10, isolation_level=None
+        )
         self.connection.execute(
             "CREATE TABLE IF NOT EXISTS attempts ("
             "account_id TEXT NOT NULL, signal_id TEXT NOT NULL, utc_day TEXT NOT NULL,"
@@ -231,8 +233,8 @@ def confirm_source(
         if len(matches) > 1:
             raise ValueError("SOURCE_DUPLICATE_HYPE_POSITION")
         if matches:
-            quantity += _d(matches[0].get("szi"))
-    after = _d(signal["signed_quantity_after"])
+            quantity += parse_decimal(matches[0].get("szi"))
+    after = parse_decimal(signal["signed_quantity_after"])
     if (
         (after > 0 and quantity < after)
         or (after < 0 and quantity > after)
@@ -246,27 +248,6 @@ def confirm_source(
     }
 
 
-def _order_payload(
-    intent, *, account_id: str, side: str, position_side: str, opening: bool
-) -> dict:
-    return {
-        "accountId": account_id,
-        "intentId": intent.id,
-        "exchange": "hyperliquid",
-        "type": "market",
-        "side": side,
-        "positionSide": position_side,
-        "productType": "perp",
-        "timeInForce": "IOC",
-        "asset": "HYPE",
-        "base": "HYPE",
-        "quote": "USDC",
-        "quantity": intent.quantity,
-        "reduceOnly": not opening,
-        "closePosition": False,
-    }
-
-
 def _submit_once(
     client,
     journal: IntentJournal,
@@ -276,79 +257,39 @@ def _submit_once(
     direction: str,
     quantity: Decimal,
 ) -> dict:
-    buy = (direction == "long") == opening
-    side = "buy" if buy else "sell"
-    intent = journal.stage(
-        account_id,
-        "HYPE",
-        side,
-        direction,
-        str(quantity),
-        reduce_only=not opening,
-        position_id="diagnostic-signal-position" if not opening else None,
-    )
-    payload = _order_payload(
-        intent,
+    intent_id, row, filled = submit_trial_order(
+        client,
+        journal,
         account_id=account_id,
-        side=side,
-        position_side=direction,
+        asset="HYPE",
+        direction=direction,
         opening=opening,
+        quantity=quantity,
+        position_id="diagnostic-signal-position",
+        post_error_msg="CANARY_POST_UNCERTAIN_NO_RETRY",
+        invalid_ack_msg="CANARY_ACK_INVALID_NO_RETRY",
+        unsettled_msg="CANARY_ORDER_UNSETTLED_NO_RETRY",
     )
-    try:
-        result = client.create_orders([payload])
-    except Exception as exc:
-        journal.mark(intent.id, "unknown")
-        raise RuntimeError("CANARY_POST_UNCERTAIN_NO_RETRY") from exc
-    if (
-        not isinstance(result, list)
-        or len(result) != 1
-        or result[0].get("accountId") != account_id
-        or result[0].get("intentId") != intent.id
-        or result[0].get("asset") != "HYPE"
-        or not isinstance(result[0].get("orderId"), str)
-    ):
-        journal.mark(intent.id, "unknown")
-        raise RuntimeError("CANARY_ACK_INVALID_NO_RETRY")
-    row = result[0]
-    filled = _d(row.get("cumulativeQuantity", "0"))
-    status = row.get("status")
-    if status == "filled" and filled == quantity:
-        journal.mark(intent.id, "filled")
-    elif status in {"rejected", "expired"} and filled == 0:
-        journal.mark(intent.id, status)
-    elif status in {"partial", "partially_filled"} and 0 < filled < quantity:
-        journal.mark(intent.id, "partial")
-    else:
-        journal.mark(intent.id, "unknown")
-        raise RuntimeError("CANARY_ORDER_UNSETTLED_NO_RETRY")
     return {
-        "intent_id": intent.id,
+        "intent_id": intent_id,
         "order_id": row["orderId"],
-        "status": status,
+        "status": row.get("status"),
         "filled_quantity": str(filled),
     }
-
-
-def _position_book(client) -> list[dict]:
-    return [
-        x
-        for x in client.get_open_positions(base="HYPE")
-        if x.get("asset") == "HYPE" and _d(x.get("quantity", "0")) > 0
-    ]
 
 
 def execute_one(
     client, journal: IntentJournal, target: dict, *, account_id: str = ACCOUNT_ID
 ) -> dict:
     """Execute a single capped Free Trial canary and verify reduce-only flatness."""
-    if journal.connection.execute("SELECT COUNT(*) FROM intents").fetchone()[0]:
+    if journal.count():
         raise PermissionError("DIAGNOSTIC_JOURNAL_ALREADY_HAS_INTENTS")
-    check_trial(client, account_id)
-    qty = _d(target["quantity"])
+    check_trial(client, account_id, asset="HYPE")
+    qty = parse_decimal(target["quantity"])
     if (
         qty <= 0
         or qty > MAX_QUANTITY
-        or _d(target["reference_notional"]) > MAX_NOTIONAL
+        or parse_decimal(target["reference_notional"]) > MAX_NOTIONAL
     ):
         raise ValueError("DIAGNOSTIC_QUANTITY_INVALID")
     opened = _submit_once(
@@ -370,24 +311,22 @@ def execute_one(
     if opened["status"] in {"rejected", "expired"}:
         output["closing"] = None
         return output
-    actual_open = _d(opened["filled_quantity"])
+    actual_open = parse_decimal(opened["filled_quantity"])
     if not 0 < actual_open <= qty:
         raise RuntimeError("DIAGNOSTIC_OPEN_FILL_UNRESOLVED")
-    positions = []
-    for i in range(5):
-        positions = _position_book(client)
-        if (
-            len(positions) == 1
-            and positions[0].get("positionSide") == target["direction"]
-            and _d(positions[0]["quantity"]) == actual_open
-        ):
-            break
-        if i < 4:
-            sleep(0.4)
+    positions = poll_positions(
+        client,
+        lambda rows: (
+            len(rows) == 1
+            and rows[0].get("positionSide") == target["direction"]
+            and parse_decimal(rows[0]["quantity"]) == actual_open
+        ),
+        asset="HYPE",
+    )
     if (
         len(positions) != 1
         or positions[0].get("positionSide") != target["direction"]
-        or _d(positions[0]["quantity"]) != actual_open
+        or parse_decimal(positions[0]["quantity"]) != actual_open
     ):
         raise RuntimeError("DIAGNOSTIC_POSITION_AFTER_OPEN_UNKNOWN")
     closed = _submit_once(
@@ -401,12 +340,7 @@ def execute_one(
     output["closing"] = closed
     if closed["status"] != "filled":
         raise RuntimeError("DIAGNOSTIC_EXIT_NOT_FULLY_FILLED")
-    for i in range(5):
-        positions = _position_book(client)
-        if not positions:
-            break
-        if i < 4:
-            sleep(0.4)
+    positions = poll_positions(client, lambda rows: not rows, asset="HYPE")
     if positions:
         raise RuntimeError("DIAGNOSTIC_NOT_FLAT_AFTER_REDUCE_ONLY")
     output["post_close_flat_verified"] = True
@@ -437,7 +371,7 @@ def run(args) -> dict:
     from copytrade_pm.pm_e4_prospective import _guarded_info
 
     prices, _, _ = _guarded_info({"type": "allMids"})
-    target = eligible_signal(available[0], now, _d(prices["HYPE"]))
+    target = eligible_signal(available[0], now, parse_decimal(prices["HYPE"]))
     confirmation = confirm_source(available[0], args.research_root, later=args.later)
     if not args.account_id.startswith(
         "urn:prp-account:"
@@ -450,17 +384,13 @@ def run(args) -> dict:
         or args.audit_dir.parent.stat().st_mode & 0o077
     ):
         raise PermissionError("AUDIT_PARENT_MUST_BE_PRIVATE")
-    from dotenv import dotenv_values
     from propr_sdk import ProprClient
 
-    creds = dotenv_values(args.env_file)
-    token = creds.get("PROPR_LIVE_API_KEY") or creds.get("PROPR_API_KEY")
-    if not token or not token.startswith("pk_live_"):
-        raise ValueError("PROPR_TRIAL_CREDENTIAL_UNAVAILABLE")
+    token = require_propr_live_secret(args.env_file, missing_error="PROPR_TRIAL_CREDENTIAL_UNAVAILABLE")
     client = ProprClient(api_key=token, base_url="https://api.propr.xyz/v1")
     # The account is verified read-only before consuming the global single
     # attempt for the day. Only the verified test account is supported.
-    check_trial(client, args.account_id)
+    check_trial(client, args.account_id, asset="HYPE")
     CANARY_STATE_ROOT.mkdir(mode=0o700, parents=True, exist_ok=True)
     claims = ClaimStore(CANARY_STATE_ROOT / "claims.sqlite")
     try:
@@ -483,14 +413,9 @@ def run(args) -> dict:
                 report["status"] = "HALT_INSPECT_BROKER_BEFORE_RETRY"
                 raise
         finally:
-            report["intent_states"] = journal.connection.execute(
-                "SELECT state,COUNT(*) FROM intents GROUP BY state"
-            ).fetchall()
+            report["intent_states"] = journal.state_counts()
             journal.close()
-            path = args.audit_dir / "execution-report.json"
-            with path.open("x") as handle:
-                json.dump(report, handle, indent=2, sort_keys=True)
-            os.chmod(path, stat.S_IRUSR | stat.S_IWUSR)
+            write_private_json(args.audit_dir / "execution-report.json", report, exclusive=True)
         claims.mark(
             args.account_id,
             target["signal_id"],

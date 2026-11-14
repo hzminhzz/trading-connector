@@ -5,9 +5,9 @@ from decimal import Decimal
 import httpx
 import pytest
 
+from connectors.common.validation import strict_decimal
 from connectors.propr.account import parse_account
 from connectors.propr.inventory import parse_order, parse_position
-from connectors.propr.models import finite_decimal
 from connectors.propr.rest import ProprRest, RemoteAPIError
 
 
@@ -54,7 +54,7 @@ def test_unknown_position_state_never_vanishes_as_flat(bad_status):
 @pytest.mark.parametrize("value", [True, False, "NaN", "Infinity", "1e10001", "1e-10001", "0." + "1" * 300])
 def test_invalid_financial_input_rejected(value):
     with pytest.raises(ValueError):
-        finite_decimal(value)
+        strict_decimal(value)
 
 
 def test_exact_numeric_json_tokens_survive_rest_and_derived_finance():

@@ -1,15 +1,13 @@
 import asyncio
-import json
 from decimal import Decimal as D
 import pytest
 from connectors.propr.shadow import ShadowGateway
 from connectors.propr.execution import OrderRequest
 from connectors.propr.instruments import Instrument, InstrumentRegistry
 from connectors.propr.state import IntentJournal, UnknownOutcome
+from connectors.propr.tests.conftest import ReadyReconciler as Ready
 
-class Ready:
-    def assert_opening_safe(self):
-        return None
+
 class Stale:
     def assert_opening_safe(self):
         raise UnknownOutcome("stale")
@@ -49,9 +47,9 @@ def test_shadow_journal_preserves_native_reduce_position(tmp_path):
     )
 
     result = gateway.evaluate(request)
-    payload = json.loads(journal.connection.execute(
-        "SELECT payload FROM intents"
-    ).fetchone()[0])
+    intents = journal.all_intents()
+    assert len(intents) == 1
+    assert intents[0].position_id == "native-position-7"
+    assert len(journal.audit_history()) == 1
     assert result.allowed
-    assert payload["position_id"] == "native-position-7"
     journal.close()

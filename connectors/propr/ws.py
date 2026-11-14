@@ -8,9 +8,11 @@ import hashlib
 import json
 from dataclasses import dataclass
 
+from connectors.common.intents import UnknownOutcome
+from connectors.common.validation import finite_json_loads
+
 from .config import PRODUCTION_WS_URL
 from .reconcile import AccountReconciler
-from .state import UnknownOutcome
 
 
 @dataclass(frozen=True)
@@ -49,7 +51,7 @@ class AccountWebSocket:
     @staticmethod
     def _decode(raw):
         try:
-            message = json.loads(raw)
+            message = finite_json_loads(raw)
         except (ValueError, TypeError) as exc:
             raise UnknownOutcome("Invalid provider WebSocket JSON") from exc
         if not isinstance(message, dict) or not isinstance(message.get("data"), dict):

@@ -14,11 +14,7 @@ from connectors.propr.ml4t_bridge import ML4TShadowBroker, ML4TStrategyAdapter
 from connectors.propr.models import Position as NativePosition
 from connectors.propr.shadow import ShadowGateway
 from connectors.propr.state import UnknownOutcome
-
-
-class Ready:
-    def assert_opening_safe(self):
-        pass
+from connectors.propr.tests.conftest import ReadyReconciler as Ready
 
 
 class FakeAccount:

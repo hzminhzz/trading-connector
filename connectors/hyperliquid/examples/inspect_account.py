@@ -3,13 +3,9 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 
 from connectors.hyperliquid.client import HyperliquidClient
 from connectors.hyperliquid.config import HyperliquidConfig
-
-logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
-logger = logging.getLogger("hyperliquid_inspect")
 
 
 async def main() -> None:
@@ -29,7 +25,6 @@ async def main() -> None:
         markets_count = len(client.exchange.markets) if client.exchange.markets else 0
         print(f"Markets Loaded: {markets_count}")
 
-        # Check public ticker
         ticker = await client.exchange.fetch_ticker("BTC/USDC:USDC")
         print(f"Public BTC/USDC:USDC Mark Price: ${float(ticker.get('last', 0) or 0):,.2f}")
 

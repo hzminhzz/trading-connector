@@ -5,14 +5,7 @@ import pytest
 from connectors.propr.ws import AccountWebSocket
 from connectors.propr.reconcile import AccountReconciler
 from connectors.propr.state import IntentJournal, UnknownOutcome
-
-
-class FakeReader:
-    def __init__(self):
-        self.count = 0
-    async def snapshot(self):
-        self.count += 1
-        return {"orders": [], "positions": [], "trades": []}
+from connectors.propr.tests.conftest import FakeReader
 
 
 class FakeSocket:

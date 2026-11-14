@@ -45,6 +45,7 @@ def local_journal(tmp_path: Path):
     path = tmp_path / "journal.db"
     journal = IntentJournal(path)
     original = journal.stage("account-actual", "BTC", "buy", "long", "0.1")
+    journal.mark(original.id, "accepted")
     journal.close()
     os.chmod(path, 0o600)
     return path, original.id
@@ -71,10 +72,13 @@ def test_idempotent_projection_restarts_without_mutating_broker_intents(tmp_path
     second = Combo2PaperProjection(path)
     assert push(second) == 0
     assert second.summary()["paper_decisions"] == 1
+    verifier = IntentJournal(path)
+    try:
+        assert verifier.states() == ["accepted"]
+        assert verifier.get(broker_id).id == broker_id
+    finally:
+        verifier.close()
     with sqlite3.connect(path) as conn:
-        assert conn.execute("SELECT id,state FROM intents").fetchall() == [
-            (broker_id, "staged")
-        ]
         assert (
             conn.execute("SELECT COUNT(*) FROM combo2_paper_actions").fetchone()[0] == 2
         )

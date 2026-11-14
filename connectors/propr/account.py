@@ -3,8 +3,10 @@ from dataclasses import dataclass
 from decimal import Decimal
 from urllib.parse import quote
 
+from connectors.common.validation import exact_decimal_sum, optional_strict_decimal
+
 from .config import ProprConfig, Mode
-from .models import exact_decimal_sum, finite_decimal
+from .models import validate_account_id
 from .rest import ProprRest, RemoteAPIError
 
 
@@ -63,13 +65,11 @@ class AccountSnapshot:
 
 
 def _optional_decimal(data, name):
-    value = data.get(name)
-    if value is None:
-        return None
-    try:
-        return finite_decimal(value)
-    except ValueError as exc:
-        raise RemoteAPIError("Invalid account financial field") from exc
+    return optional_strict_decimal(
+        data.get(name),
+        name,
+        error_cls=lambda _msg: RemoteAPIError("Invalid account financial field"),
+    )
 
 
 def parse_account(account_id, attempt_id, raw):
@@ -105,12 +105,7 @@ def parse_account(account_id, attempt_id, raw):
 
 class ReadOnlyAccount:
     def __init__(self, config: ProprConfig, transport=None):
-        if config.account_id is not None and (
-            not isinstance(config.account_id, str)
-            or not config.account_id.strip()
-            or "/" in config.account_id
-        ):
-            raise ValueError("Invalid account ID")
+        validate_account_id(config.account_id, allow_none=True)
         if not config.api_key:
             raise ValueError("Explicit API key required")
         if config.mode is not Mode.READ_ONLY:

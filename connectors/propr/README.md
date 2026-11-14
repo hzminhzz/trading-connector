@@ -4,7 +4,7 @@ Official Propr integration supporting both direct SDK trading and `ml4t-live` as
 
 The connector includes:
 
-- **Propr SDK (`propr_sdk.py` / `connectors.propr.sdk`):** Official client for Propr REST and WebSocket APIs (`/health`, `/accounts`, `/orders`, `/positions`, `/trades`, `/margin-config`).
+- **Propr SDK (`propr_sdk.py`):** Client for Propr REST and WebSocket APIs (`/health`, `/accounts`, `/orders`, `/positions`, `/trades`, `/margin-config`).
 - **`ProprLiveBroker` (`connectors.propr.ml4t_bridge`):** Live execution broker implementing `ml4t.live.protocols.AsyncBrokerProtocol` for running ML4T strategies directly against active Propr accounts.
 - **`ML4TShadowBroker`:** Safe offline/shadow adapter for validating strategy signals without remote execution.
 - **Account inspection:** Safe read-only inspection (`inspect_account.py`) with support for `.env` credentials (`PROPR_API_KEY` / `PROPR_LIVE_API_KEY`).

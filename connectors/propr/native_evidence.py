@@ -2,15 +2,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
 from decimal import Decimal
 from typing import Any
 from urllib.parse import quote
 
+from connectors.common.validation import optional_strict_decimal, parse_utc_iso
+
 from ..execution_capabilities import ExecutionCapabilities
 from .account import discover_account, parse_account
 from .inventory import Inventory, InventoryReader
-from .models import finite_decimal, one_way_positions
+from .models import is_valid_account_id, one_way_positions
 from .rest import RemoteAPIError
 
 SCHEMA_VERSION = "propr_native_evidence_v1"
@@ -68,11 +69,19 @@ def unknown_financial():
     return NativeFinancial(*(missing for _ in range(8)))
 
 
+def _native_payload(raw: Any) -> dict[str, Any] | None:
+    native = raw.get("data", raw) if isinstance(raw, dict) else None
+    return native if isinstance(native, dict) else None
+
+
 def financial_from(raw, account_id, attempt_id):
     snap = parse_account(account_id, attempt_id, raw)
-    native = raw.get("data", raw)
-    isolated = native.get("isolatedPositionMargin") if isinstance(native, dict) else None
-    isolated = finite_decimal(isolated) if isolated is not None else None
+    native = _native_payload(raw)
+    isolated = optional_strict_decimal(
+        native.get("isolatedPositionMargin") if native is not None else None,
+        "isolatedPositionMargin",
+        error_cls=RemoteAPIError,
+    )
     return NativeFinancial(
         field(snap.balance, "balance"),
         field(snap.equity, "balance + totalUnrealizedPnl + isolatedPositionMargin", True),
@@ -101,7 +110,7 @@ async def inspect_native_evidence(rest: Any, *, account_id: str, endpoint: str,
             stream_connected, False, None, False, tuple(sorted(set(reasons))),
         )
 
-    if (not isinstance(account_id, str) or not account_id.strip() or "/" in account_id
+    if (not is_valid_account_id(account_id)
             or not isinstance(endpoint, str) or type(known_at_ms) is not int or known_at_ms < 0):
         reasons.append("INVALID_EVIDENCE_REQUEST")
         return result()
@@ -124,8 +133,8 @@ async def inspect_native_evidence(rest: Any, *, account_id: str, endpoint: str,
 
     try:
         raw = await rest.request("GET", f"/accounts/{quote(account_id, safe='')}")
-        native = raw.get("data", raw) if isinstance(raw, dict) else None
-        if not isinstance(native, dict) or "accountId" not in native:
+        native = _native_payload(raw)
+        if native is None or "accountId" not in native:
             bound = False
             reasons.append("ACCOUNT_SNAPSHOT_IDENTITY_UNATTESTED")
             return result()
@@ -134,14 +143,9 @@ async def inspect_native_evidence(rest: Any, *, account_id: str, endpoint: str,
         bound = False
         reasons.append("ACCOUNT_FINANCIAL_INVALID")
         return result()
-    native = raw.get("data", raw)
-    provider_time = native.get("updatedAt") if isinstance(native, dict) else None
+    provider_time = native.get("updatedAt")
     try:
-        if not isinstance(provider_time, str):
-            raise ValueError("missing time")
-        parsed = datetime.fromisoformat(provider_time.replace("Z", "+00:00"))
-        if parsed.tzinfo is None:
-            raise ValueError("naive provider time")
+        parsed = parse_utc_iso(provider_time, "updatedAt")
         stamp_ms = int(parsed.timestamp() * 1000)
         if not 0 <= known_at_ms - stamp_ms <= 30000:
             reasons.append("PROVIDER_TIME_STALE")

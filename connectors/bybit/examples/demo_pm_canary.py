@@ -24,6 +24,7 @@ import secrets
 import tempfile
 from typing import Any
 
+from connectors.common.validation import strict_decimal
 from connectors.bybit.broker import BybitLiveBroker
 from connectors.bybit.client import BybitClient
 from connectors.bybit.config import BybitConfig, Environment, Mode
@@ -41,16 +42,17 @@ LEADER_EQUITY = Decimal("100000")
 SLEEVE_USD = Decimal("1000")
 GROSS_CAP_USD = Decimal("5000")
 COIN_CAP_USD = Decimal("1250")
+
 PRIVATE_ROOT = Path.home() / ".local/share/copytrade/bybit-demo-pm-canary"
 
 
 def decimal(value: Any) -> Decimal:
     if value is None or isinstance(value, bool):
         raise ValueError("UNAVAILABLE_CANARY_NUMBER")
-    result = Decimal(str(value))
-    if not result.is_finite():
-        raise ValueError("NONFINITE_CANARY_NUMBER")
-    return result
+    try:
+        return strict_decimal(value, "canary_number")
+    except ValueError as exc:
+        raise ValueError("NONFINITE_CANARY_NUMBER") from exc
 
 
 def assert_demo_config(config: BybitConfig) -> None:
@@ -235,7 +237,7 @@ async def fetch_trade_fills(
     pages = 0
     for pages in range(1, 26):
         response = await client.exchange.private_get_v5_execution_list(dict(params))
-        result = client._v5_result(response, "demo_execution_list")
+        result = client.v5_result(response, "demo_execution_list")
         rows = result.get("list")
         if not isinstance(rows, list) or not all(isinstance(x, dict) for x in rows):
             raise RuntimeError("DEMO_EXECUTION_LIST_UNAVAILABLE")
@@ -295,20 +297,17 @@ def reconcile_verified_fill(
     journal: BybitIntentJournal, order_id: str, executed_quantity: Decimal
 ) -> None:
     """Promote a staged/submitted intent ONLY after exact independent V5 fill."""
-    rows = journal.connection.execute(
-        "SELECT id, quantity, state FROM intents WHERE exchange_order_id = ?",
-        (order_id,),
-    ).fetchall()
+    rows = journal.intents_for_exchange_order(order_id)
     if len(rows) != 1:
         raise ValueError("CANARY_INTENT_ORDER_ID_NOT_UNIQUE")
-    intent_id, requested, state = rows[0]
-    if executed_quantity <= 0 or decimal(requested) != executed_quantity:
+    record = rows[0]
+    if executed_quantity <= 0 or decimal(record.quantity) != executed_quantity:
         raise ValueError("CANARY_INTENT_FILL_QUANTITY_NOT_EXACT")
-    if state == "filled":
+    if record.state == "filled":
         return
-    if state != "submitted":
+    if record.state != "submitted":
         raise ValueError("CANARY_INTENT_NOT_SUBMITTED")
-    journal.mark_terminal(intent_id, "filled")
+    journal.mark_terminal(record.id, "filled")
 
 
 async def verify_existing(audit_dir: Path) -> dict[str, Any]:
@@ -559,7 +558,7 @@ async def run(execute: bool, *, root: Path = PRIVATE_ROOT) -> dict[str, Any]:
             quantity=float(qty),
             side=OrderSide.BUY,
             order_type=OrderType.MARKET,
-            params={"orderLinkId": "CPMDEMO" + secrets.token_hex(8)},
+            intent_idempotency_key="CPMDEMO" + secrets.token_hex(8),
         )
         opening_order_id = order.order_id
         report["opening_order_id"] = opening_order_id
@@ -598,7 +597,7 @@ async def run(execute: bool, *, root: Path = PRIVATE_ROOT) -> dict[str, Any]:
                         side=OrderSide.SELL,
                         order_type=OrderType.MARKET,
                         reduce_only=True,
-                        params={"orderLinkId": "CPMCLS" + secrets.token_hex(8)},
+                        intent_idempotency_key="CPMCLS" + secrets.token_hex(8),
                     )
                     closing_order_id = close.order_id
                     report["closing_order_id"] = closing_order_id

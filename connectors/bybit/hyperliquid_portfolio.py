@@ -8,10 +8,12 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime, timedelta
-from decimal import Decimal, InvalidOperation, ROUND_DOWN
+from decimal import Decimal, ROUND_DOWN
 import json
 from pathlib import Path
 from typing import Any
+
+from connectors.common.validation import strict_decimal
 
 SCHEMA = "hyperliquid_chd_76_universe_v1"
 REGISTRY = Path(__file__).with_name("hyperliquid_76.json")
@@ -25,15 +27,10 @@ VALID_SOURCE_STATUSES = frozenset(
 
 
 def _decimal(value: Any) -> Decimal:
-    if isinstance(value, bool):
-        raise ValueError("NONFINITE_MARKET_NUMBER")
     try:
-        result = Decimal(str(value))
-    except (InvalidOperation, TypeError, ValueError) as exc:
+        return strict_decimal(value, "market_number")
+    except ValueError as exc:
         raise ValueError("NONFINITE_MARKET_NUMBER") from exc
-    if not result.is_finite():
-        raise ValueError("NONFINITE_MARKET_NUMBER")
-    return result
 
 
 def _utc(value: datetime) -> datetime:

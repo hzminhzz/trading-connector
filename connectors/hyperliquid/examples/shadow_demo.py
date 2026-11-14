@@ -33,10 +33,8 @@ async def main() -> None:
         print(f"Broker cash: ${await safe_broker.get_cash_async():,.2f}")
         print(f"Broker account value: ${await safe_broker.get_account_value_async():,.2f}")
 
-        # Record a market snapshot for reference price validation
         safe_broker.record_market_snapshot("BTC/USDC", 82_000.0)
 
-        # Shadow order submission: evaluated against risk rules, recorded in shadow journal, never reaches DEX
         print("\nSubmitting shadow order (0.001 BTC)...")
         order = await safe_broker.submit_order_async(
             asset="BTC/USDC",

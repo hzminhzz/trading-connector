@@ -49,11 +49,7 @@ class FakeVenue:
             return self.orders[intent.id]
         if self.outcome == "timeout":
             raise TimeoutError("Ambiguous fake response")
-        if isinstance(self.outcome, FakeOrderResult):
-            result = self.outcome
-        else:
-            filled = request.quantity if self.outcome == "filled" else Decimal(0)
-            result = FakeOrderResult(self.outcome, filled)
+        result = _fake_result(self.outcome, request.quantity)
         self.orders[intent.id] = result
         return result
 
@@ -109,8 +105,10 @@ def _validate_result(result, quantity):
 
 
 class FakeExecutionGateway:
+    _allowed_venue_type: type[FakeVenue] = FakeVenue
+
     def __init__(self, journal: IntentJournal, venue: FakeVenue, registry):
-        if type(venue) is not FakeVenue:
+        if type(venue) is not type(self)._allowed_venue_type:
             raise PermissionError("Only deterministic fake venue is supported")
         self.journal, self.venue, self.registry = journal, venue, registry
 

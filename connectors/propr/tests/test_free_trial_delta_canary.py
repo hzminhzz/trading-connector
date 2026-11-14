@@ -265,7 +265,7 @@ def test_real_sdk_transport_shape_with_fake_client_flat_and_no_socket(
     assert client.orders[0]["side"] == ("buy" if direction == "long" else "sell")
     assert client.orders[1]["side"] != client.orders[0]["side"]
     assert not client.positions
-    assert store.connection.execute("SELECT COUNT(*) FROM intents").fetchone()[0] == 2
+    assert store.count() == 2
     with pytest.raises(PermissionError, match="ALREADY_HAS_INTENTS"):
         canary.execute_one(client, store, target)
     store.close()

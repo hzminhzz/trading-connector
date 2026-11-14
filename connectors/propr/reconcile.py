@@ -8,7 +8,7 @@ from collections import deque
 from dataclasses import dataclass
 from time import monotonic
 
-from .state import UnknownOutcome
+from connectors.common.intents import UnknownOutcome
 
 
 @dataclass(frozen=True)

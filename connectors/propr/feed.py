@@ -5,15 +5,16 @@ Trading and risk must not assume the two markets have identical prices.
 """
 import asyncio
 from datetime import UTC, datetime
-import json
+import math
 
-from .state import UnknownOutcome
+from connectors.common.intents import UnknownOutcome
+from connectors.common.validation import finite_json_loads
 
 try:
     from ml4t.specs.lifecycle import (
         BarPayload, EventCompletion, LifecycleVersion, MarketEvent, MarketEventKind,
     )
-except ImportError:  # ML4T is an optional integration
+except ImportError:
     BarPayload = EventCompletion = LifecycleVersion = MarketEvent = MarketEventKind = None
 
 
@@ -89,9 +90,14 @@ def binance_completed_kline(message, *, asset, symbol, interval="1m", now=None):
         return None
     event_time = datetime.fromtimestamp((int(k["T"]) + 1) / 1000, UTC)
     receipt_time = now or datetime.now(UTC)
+    ohlcv = {field: float(k[field]) for field in ("o", "h", "l", "c", "v")}
+    if not all(math.isfinite(val) for val in ohlcv.values()):
+        raise ValueError("Non-finite Binance kline values")
+    if any(ohlcv[field] <= 0 for field in ("o", "h", "l", "c")) or ohlcv["v"] < 0:
+        raise ValueError("Out-of-range Binance kline OHLCV values")
     data = BarPayload(
-        open=float(k["o"]), high=float(k["h"]), low=float(k["l"]),
-        close=float(k["c"]), volume=float(k["v"]),
+        open=ohlcv["o"], high=ohlcv["h"], low=ohlcv["l"],
+        close=ohlcv["c"], volume=ohlcv["v"],
     )
     return MarketEvent(
         version=LifecycleVersion.V1, event_time=event_time, receipt_time=receipt_time,
@@ -123,7 +129,7 @@ class BinanceCompletedKlineFeed(ValidatedExternalFeed):
         async with self.connector(url, ping_interval=20, ping_timeout=10, close_timeout=5) as ws:
             async for raw in ws:
                 try:
-                    message = json.loads(raw)
+                    message = finite_json_loads(raw)
                     event = binance_completed_kline(
                         message, asset=self.asset, symbol=self.symbol,
                     )

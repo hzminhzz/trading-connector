@@ -12,6 +12,7 @@ import pytest
 
 pm = pytest.importorskip("copytrade_pm.pm_combo2")
 from connectors.bybit.hyperliquid_portfolio import shadow_target_preview  # noqa: E402
+from connectors.bybit.tests.conftest import make_linear_perp_market  # noqa: E402
 
 Combo2PaperTracker = pm.Combo2PaperTracker
 BTC = "hyperliquid/mainnet:perp:default/BTC"
@@ -88,26 +89,9 @@ def actual_pm_report(tmp_path, positions, *, hedge="0", shocks=None):
 
 
 def bybit_market():
-    return {
-        "symbol": "BTC/USDT:USDT",
-        "id": "BTCUSDT",
-        "base": "BTC",
-        "quote": "USDT",
-        "settle": "USDT",
-        "linear": True,
-        "swap": True,
-        "active": True,
-        "info": {
-            "status": "Trading",
-            "contractType": "LinearPerpetual",
-            "lotSizeFilter": {
-                "qtyStep": "0.001",
-                "minOrderQty": "0.001",
-                "minNotionalValue": "5",
-            },
-            "priceFilter": {"tickSize": "0.1"},
-        },
-    }
+    return make_linear_perp_market(
+        "BTC", qty_step="0.001", min_qty="0.001", min_notional="5", tick_size="0.1"
+    )
 
 
 def bridge(report):

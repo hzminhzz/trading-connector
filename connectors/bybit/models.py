@@ -1,84 +1,57 @@
-# pyright: reportMissingTypeArgument=false, reportUnknownParameterType=false, reportUnknownVariableType=false, reportUnknownMemberType=false, reportMissingImports=false
-"""Bybit connector data models and structured error hierarchies."""
+"""Normalized domain models and sanitized exception hierarchy for Bybit V5."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Any
 
+from connectors.ccxt_support.models import (
+    CCXTBalance,
+    CCXTError,
+    CCXTOrderData,
+    CCXTPositionData,
+)
 
-class BybitError(Exception):
-    """Base exception for all Bybit connector failures."""
+
+class BybitError(CCXTError):
+    """Base exception for Bybit connector failures."""
 
 
 class BybitAuthenticationError(BybitError):
-    """Raised when API credentials are rejected or permissions are insufficient."""
+    """Raised on authentication / credential failures."""
 
 
 class BybitRateLimitError(BybitError):
-    """Raised when exchange rate limits are exceeded."""
+    """Raised when Bybit API rate limits are exceeded."""
 
 
 class BybitInsufficientFundsError(BybitError):
-    """Raised when account has insufficient margin or balance to place order."""
+    """Raised on margin/balance insufficiency."""
 
 
 class BybitOrderNotFoundError(BybitError):
-    """Raised when an order ID is not found for cancel or replace."""
+    """Raised when an order cannot be located on the venue."""
 
 
 class BybitInvalidOrderError(BybitError):
-    """Raised when order parameters violate exchange limits, tick size, or step size."""
+    """Raised when order parameters fail venue validation."""
 
 
 class BybitNetworkError(BybitError):
-    """Raised on connection drops, timeouts, or DNS failures."""
+    """Raised on connectivity or transport errors."""
 
 
 class BybitSnapshotError(BybitError):
-    """A required authenticated Bybit snapshot is missing, ambiguous or unsupported."""
+    """Raised when Bybit Demo snapshot or identity attestation fails."""
 
 
-@dataclass(frozen=True)
+@dataclass
 class BybitAccountSummary:
-    """Bybit V5 UNIFIED account-level USD totals (not individual coin balances)."""
-
     equity_usd: Decimal
     available_usd: Decimal
+    raw: dict[str, Any] = field(default_factory=dict)
 
 
-@dataclass(frozen=True)
-class BybitBalance:
-    currency: str
-    total: Decimal
-    free: Decimal
-    used: Decimal
-    raw: dict[str, Any]
-
-
-@dataclass(frozen=True)
-class BybitPositionData:
-    symbol: str
-    side: str  # "buy" / "long" or "sell" / "short"
-    size: Decimal
-    entry_price: Decimal | None
-    mark_price: Decimal | None
-    unrealized_pnl: Decimal | None
-    leverage: Decimal | None
-    liquidation_price: Decimal | None
-    raw: dict[str, Any]
-
-
-@dataclass(frozen=True)
-class BybitOrderData:
-    order_id: str
-    client_order_id: str | None
-    symbol: str
-    side: str
-    order_type: str
-    price: Decimal | None
-    quantity: Decimal
-    filled_quantity: Decimal
-    status: str
-    timestamp: int | None
-    raw: dict[str, Any]
+BybitBalance = CCXTBalance
+BybitPositionData = CCXTPositionData
+BybitOrderData = CCXTOrderData

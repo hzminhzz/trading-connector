@@ -2,15 +2,11 @@
 from dataclasses import dataclass
 from enum import Enum
 
+from connectors.common.config import Mode
+
 
 class Environment(str, Enum):
     PRODUCTION = "production"
-
-
-class Mode(str, Enum):
-    READ_ONLY = "read_only"
-    SHADOW = "shadow"
-    EXECUTION = "execution"
 
 
 PRODUCTION_WS_URL = "wss://api.propr.xyz/ws"

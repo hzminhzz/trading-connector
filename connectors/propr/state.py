@@ -1,26 +1,9 @@
 """SQLite WAL intent journal: staged before submission, ambiguous outcomes halt openings."""
 import json
-import secrets
-import sqlite3
 import time
 from dataclasses import dataclass
 
-
-class UnknownOutcome(RuntimeError):
-    pass
-
-
-_CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
-
-
-def new_ulid() -> str:
-    """26-character Crockford ULID using millisecond time and CSPRNG."""
-    value = ((time.time_ns() // 1_000_000) << 80) | secrets.randbits(80)
-    chars = []
-    for _ in range(26):
-        chars.append(_CROCKFORD[value & 31])
-        value >>= 5
-    return "".join(reversed(chars))
+from connectors.common.intents import UnknownOutcome, new_ulid, open_wal_sqlite
 
 
 @dataclass(frozen=True)
@@ -37,9 +20,7 @@ class Intent:
 
 class IntentJournal:
     def __init__(self, path):
-        self.connection = sqlite3.connect(path)
-        self.connection.execute("PRAGMA journal_mode=WAL")
-        self.connection.execute("PRAGMA synchronous=FULL")
+        self.connection = open_wal_sqlite(path, synchronous="FULL")
         self.connection.execute(
             "CREATE TABLE IF NOT EXISTS intents (id TEXT PRIMARY KEY, payload TEXT NOT NULL, state TEXT NOT NULL)"
         )
@@ -130,6 +111,21 @@ class IntentJournal:
 
     def audit_history(self):
         return self.connection.execute("SELECT kind,detail FROM audit ORDER BY seq").fetchall()
+
+    def all_intents(self) -> list[Intent]:
+        rows = self.connection.execute("SELECT payload FROM intents ORDER BY rowid").fetchall()
+        return [Intent(**json.loads(row[0])) for row in rows]
+
+    def count(self) -> int:
+        return self.connection.execute("SELECT COUNT(*) FROM intents").fetchone()[0]
+
+    def states(self) -> list[str]:
+        return [
+            row[0] for row in self.connection.execute("SELECT state FROM intents ORDER BY rowid")
+        ]
+
+    def state_counts(self) -> list[tuple[str, int]]:
+        return self.connection.execute("SELECT state,COUNT(*) FROM intents GROUP BY state").fetchall()
 
     def close(self):
         self.connection.close()

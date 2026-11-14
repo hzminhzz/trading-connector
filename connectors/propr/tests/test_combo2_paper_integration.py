@@ -92,6 +92,7 @@ def test_verified_paper_chain_projects_once_without_touching_real_intents(tmp_pa
     journal_path = tmp_path / "intent-journal.sqlite"
     journal = IntentJournal(journal_path)
     real_intent = journal.stage("real-account", "BTC", "buy", "long", "0.2")
+    journal.mark(real_intent.id, "accepted")
     journal.close()
     os.chmod(journal_path, 0o600)
     before = engine.state()
@@ -107,10 +108,13 @@ def test_verified_paper_chain_projects_once_without_touching_real_intents(tmp_pa
         == 0
     )
     assert engine.state() == before
+    verifier = IntentJournal(journal_path)
+    try:
+        assert verifier.states() == ["accepted"]
+        assert verifier.get(real_intent.id).id == real_intent.id
+    finally:
+        verifier.close()
     with sqlite3.connect(journal_path) as conn:
-        assert conn.execute("SELECT id,state FROM intents").fetchall() == [
-            (real_intent.id, "staged")
-        ]
         assert (
             conn.execute("SELECT COUNT(*) FROM combo2_paper_actions").fetchone()[0] == 1
         )
@@ -127,8 +131,12 @@ def test_corrupt_paper_journal_never_projects_new_records(tmp_path):
         stream.write(b"truncated")
     with pytest.raises(ValueError, match="TRUNCATED_EVENT_TAIL"):
         verified_projection(paper_root, "combo2-local", journal_path)
+    verifier = IntentJournal(journal_path)
+    try:
+        assert verifier.count() == 0
+    finally:
+        verifier.close()
     with sqlite3.connect(journal_path) as conn:
-        assert conn.execute("SELECT COUNT(*) FROM intents").fetchone()[0] == 0
         assert "combo2_paper_decisions" not in {
             row[0] for row in conn.execute("SELECT name FROM sqlite_master")
         }

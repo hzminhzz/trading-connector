@@ -1,22 +1,36 @@
 import asyncio
 import httpx
 import pytest
-from connectors.propr.rest import ProprRest, RemoteAPIError
+from connectors.propr.rest import ProprRest, RemoteAPIError, TransportPolicy
 
-def test_read_only_transport_rejects_post_before_network():
+
+def test_read_only_transport_rejects_mutations_and_credentials_before_network():
     calls = []
+
     def handler(request):
         calls.append(request.method)
         return httpx.Response(200, json={})
+
     async def run():
         rest = ProprRest("https://api.propr.xyz/v1", "pk_live_dummy", transport=httpx.MockTransport(handler))
         try:
+            for method in ("POST", "PUT", "PATCH", "DELETE"):
+                with pytest.raises(PermissionError):
+                    await rest.request(method, "/accounts/a/orders", json={})
             with pytest.raises(PermissionError):
-                await rest.request("POST", "/accounts/a/orders", json={})
+                await rest.request("GET", "/health", headers={"X-API-Key": "override"})
+            with pytest.raises(PermissionError):
+                await rest.client.post("/accounts/a/orders", json={})
             assert calls == []
         finally:
             await rest.close()
+
     asyncio.run(run())
+
+
+def test_nonoverrideable_transport_policy():
+    with pytest.raises(TypeError):
+        TransportPolicy(allow_mutations=True)
 
 def test_pagination_works_past_twenty():
     def handler(request):

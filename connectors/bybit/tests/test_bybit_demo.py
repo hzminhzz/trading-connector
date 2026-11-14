@@ -1,5 +1,7 @@
 """Credential-free regression tests for Bybit Demo Trading environment routing."""
-from unittest.mock import MagicMock
+import asyncio
+from decimal import Decimal
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -7,6 +9,7 @@ from connectors.bybit.broker import BybitLiveBroker
 from connectors.bybit.client import BybitClient
 from connectors.bybit.config import BybitConfig, Environment, Mode
 from connectors.bybit.journal import BybitIntentJournal
+from connectors.bybit.models import BybitAccountSummary
 
 
 def test_demo_environment_uses_distinct_credentials(monkeypatch):
@@ -70,9 +73,19 @@ def test_demo_routing_on_injected_exchange():
 def test_demo_is_paper_but_not_live():
     client = MagicMock()
     client.config = BybitConfig(environment=Environment.DEMO, mode=Mode.EXECUTION, api_key="demo", api_secret="demo")
+    client.connect = AsyncMock()
+    client.close = AsyncMock()
+    client.fetch_balance = AsyncMock(return_value={})
+    client.fetch_positions = AsyncMock(return_value=[])
+    client.fetch_open_orders = AsyncMock(return_value=[])
+    client.fetch_demo_account_summary = AsyncMock(
+        return_value=BybitAccountSummary(Decimal("5000"), Decimal("5000"))
+    )
+    client.fetch_demo_positions = AsyncMock(return_value=[])
+    client.fetch_demo_open_orders = AsyncMock(return_value=[])
     client.demo_identity_verified = True  # synthetic authenticated Demo fixture
     broker = BybitLiveBroker(client=client, journal=BybitIntentJournal(":memory:"))
-    broker._connected = True
+    asyncio.run(broker.connect())
     broker.assert_paper_trading()
     with pytest.raises(PermissionError, match="MAINNET"):
         broker.assert_live_trading()
@@ -82,4 +95,4 @@ def test_demo_read_only_disallows_remote_mutations():
     cfg = BybitConfig(environment=Environment.DEMO, mode=Mode.READ_ONLY)
     client = BybitClient(cfg, exchange=MagicMock())
     with pytest.raises(PermissionError, match="Remote order mutation"):
-        client._assert_execution_allowed("create_order")
+        asyncio.run(client.create_order("BTC/USDT:USDT", "buy", "market", 0.01))

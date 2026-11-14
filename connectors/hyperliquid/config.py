@@ -1,6 +1,4 @@
-# pyright: reportMissingTypeArgument=false, reportUnknownParameterType=false, reportUnknownVariableType=false, reportUnknownMemberType=false, reportMissingImports=false
-# type: ignore
-"""Hyperliquid connector configuration and environment isolation."""
+"""Hyperliquid connector configuration with fail-closed execution mode gates."""
 from __future__ import annotations
 
 import os
@@ -8,16 +6,12 @@ from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 
+from connectors.common.config import Mode, load_env_file
+
 
 class Environment(str, Enum):
-    MAINNET = "mainnet"
     TESTNET = "testnet"
-
-
-class Mode(str, Enum):
-    READ_ONLY = "read_only"
-    SHADOW = "shadow"
-    EXECUTION = "execution"
+    MAINNET = "mainnet"
 
 
 @dataclass(frozen=True)
@@ -26,44 +20,34 @@ class HyperliquidConfig:
     mode: Mode = Mode.READ_ONLY
     wallet_address: str | None = None
     private_key: str | None = None
-    vault_address: str | None = None
     default_type: str = "swap"  # Linear USDC perpetuals default
+    timeout_ms: int = 10000
+    enable_rate_limit: bool = True
 
     def __post_init__(self) -> None:
-        env = Environment(self.environment)
-        mode = Mode(self.mode)
-        object.__setattr__(self, "environment", env)
-        object.__setattr__(self, "mode", mode)
-
-        if mode is Mode.EXECUTION:
+        if self.mode is Mode.EXECUTION:
             if not self.wallet_address or not self.private_key:
-                raise ValueError("Wallet address and private key required for EXECUTION mode")
+                raise ValueError(
+                    "Wallet address and private key required for EXECUTION mode"
+                )
 
     @classmethod
     def from_env(cls, env_path: str | Path | None = None) -> HyperliquidConfig:
-        """Loads configuration from environment variables or .env file."""
-        try:
-            from dotenv import load_dotenv
+        load_env_file(env_path)
+        env_flag = os.environ.get("HYPERLIQUID_TESTNET", "true").strip().lower()
+        environment = (
+            Environment.TESTNET if env_flag in ("1", "true", "yes") else Environment.MAINNET
+        )
 
-            if env_path:
-                _ = load_dotenv(env_path)
-            else:
-                _ = load_dotenv()
-        except ImportError:
-            pass
-
-        testnet_raw = os.getenv("HYPERLIQUID_TESTNET", "true").lower()
-        is_testnet = testnet_raw in ("true", "1", "yes", "t")
-        env = Environment.TESTNET if is_testnet else Environment.MAINNET
-
-        mode_str = os.getenv("HYPERLIQUID_MODE", Mode.READ_ONLY.value).lower()
+        mode_str = os.environ.get("HYPERLIQUID_MODE", "read_only").strip().lower()
         mode = Mode(mode_str)
 
+        wallet_address = os.environ.get("HYPERLIQUID_WALLET_ADDRESS")
+        private_key = os.environ.get("HYPERLIQUID_PRIVATE_KEY")
+
         return cls(
-            environment=env,
+            environment=environment,
             mode=mode,
-            wallet_address=os.getenv("HYPERLIQUID_WALLET_ADDRESS"),
-            private_key=os.getenv("HYPERLIQUID_PRIVATE_KEY"),
-            vault_address=os.getenv("HYPERLIQUID_VAULT_ADDRESS"),
-            default_type=os.getenv("HYPERLIQUID_DEFAULT_TYPE", "swap"),
+            wallet_address=wallet_address,
+            private_key=private_key,
         )

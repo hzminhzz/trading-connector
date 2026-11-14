@@ -70,9 +70,7 @@ def test_fake_lifecycle_preserves_cumulative_quantity(tmp_path, result):
         )
         assert status == result.status
         assert journal.get(intent.id) == intent
-        assert journal.connection.execute(
-            "SELECT state FROM intents WHERE id=?", (intent.id,)
-        ).fetchone()[0] == result.status
+        assert journal.states() == [result.status]
         assert venue.orders[intent.id].cumulative_quantity == result.cumulative_quantity
 
     asyncio.run(run())
@@ -160,10 +158,7 @@ def test_unknown_split_batch_member_blocks_openings(tmp_path):
     async def run():
         with pytest.raises(UnknownOutcome, match="Batch contains unknown"):
             await gateway.submit_batch(requests)
-        states = journal.connection.execute(
-            "SELECT state FROM intents ORDER BY rowid"
-        ).fetchall()
-        assert states == [("open",), ("unknown",)]
+        assert journal.states() == ["open", "unknown"]
         with pytest.raises(UnknownOutcome):
             await gateway.submit(requests[0])
 

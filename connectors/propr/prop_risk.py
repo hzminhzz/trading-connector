@@ -6,7 +6,7 @@ market feeds; no guessed prop rule or synthetic risk state can arm remote orders
 from dataclasses import dataclass
 from decimal import Decimal
 
-from .models import finite_decimal
+from connectors.common.validation import strict_decimal
 
 
 @dataclass(frozen=True)
@@ -112,7 +112,7 @@ class PropRiskGate:
         if evidence.leverage <= 0 or evidence.leverage > self.limits.max_leverage:
             self.trip("Leverage limit breached")
         try:
-            quantity = finite_decimal(request.quantity)
+            quantity = strict_decimal(request.quantity)
         except ValueError:
             self.trip("Invalid order size")
         if quantity <= 0 or evidence.market_price <= 0:

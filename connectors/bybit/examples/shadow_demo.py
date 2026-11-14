@@ -17,7 +17,6 @@ async def main() -> None:
     config = BybitConfig(Environment.TESTNET, Mode.SHADOW)
     raw_broker = BybitLiveBroker(config=config)
 
-    # Risk controls for shadow drill
     risk_config = LiveRiskConfig(
         execution_mode="shadow",
         max_order_value=500.0,
@@ -34,10 +33,8 @@ async def main() -> None:
         print(f"Broker cash: ${await safe_broker.get_cash_async():,.2f}")
         print(f"Broker account value: ${await safe_broker.get_account_value_async():,.2f}")
 
-        # Record a market snapshot for reference price validation
         safe_broker.record_market_snapshot("BTC/USDT", 82_000.0)
 
-        # Shadow order submission: evaluated against risk rules, recorded in shadow journal, never reaches live API
         print("\nSubmitting shadow order (0.001 BTC)...")
         order = await safe_broker.submit_order_async(
             asset="BTC/USDT",
@@ -49,7 +46,6 @@ async def main() -> None:
 
     finally:
         await safe_broker.disconnect()
-        # Clean up shadow drill state file if created
         if Path(".ml4t_bybit_shadow_state.json").exists():
             Path(".ml4t_bybit_shadow_state.json").unlink()
 

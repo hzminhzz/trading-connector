@@ -191,12 +191,16 @@ def test_propr_live_broker_intent_failure_and_reconciliation_gate(tmp_path: Path
             "quote": "USDC",
             "positionSide": "long",
             "quantity": "0.01",
+            "entryPrice": "80000.0",
+            "markPrice": "80100.0",
+            "createdAt": datetime.now(UTC).isoformat(),
             "positionId": "pos-btc-1",
         }])
         mock_client.create_order = MagicMock(return_value=[{
             "orderId": "ord_exit_1",
             "asset": "BTC",
             "side": "sell",
+            "type": "market",
             "quantity": "0.01",
             "status": "filled",
             "createdAt": datetime.now(UTC).isoformat(),
@@ -280,10 +284,7 @@ def test_propr_broker_empty_order_response_marked_unknown(tmp_path: Path):
 
         # Must be marked unknown in the journal
         assert broker.journal.has_unknown() is True
-        cur = broker.journal.connection.execute("SELECT state FROM intents")
-        rows = cur.fetchall()
-        assert len(rows) == 1
-        assert rows[0][0] == "unknown"
+        assert broker.journal.states() == ["unknown"]
 
         await broker.disconnect()
 

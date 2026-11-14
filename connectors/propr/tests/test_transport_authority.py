@@ -4,7 +4,7 @@ import json
 import pytest
 import requests
 
-from propr_sdk import ProprClient
+from propr_sdk import ProprClient, SyntheticTransport
 
 
 def order():
@@ -73,3 +73,120 @@ def test_ambiguous_discovery_is_rejected(monkeypatch):
                         lambda **kw: [{"accountId": "one"}, {"accountId": "two"}])
     with pytest.raises(ValueError, match="ambiguous"):
         client.setup()
+
+
+def test_convenience_methods_forward_intent_id_and_are_denied_in_default_readonly(monkeypatch):
+    def blocked(*_args, **_kwargs):
+        raise AssertionError("network transport called for read-only client")
+
+    monkeypatch.setattr(requests.Session, "request", blocked)
+    ro_client = ProprClient(api_key="pk_live_test")
+    ro_client.account_id = "fixture-account"
+    for call in (
+        lambda: ro_client.market_buy("BTC", "0.01", client_intent_id="cid-mb"),
+        lambda: ro_client.market_sell("BTC", "0.01", client_intent_id="cid-ms"),
+        lambda: ro_client.limit_buy("BTC", "0.01", "80000", client_intent_id="cid-lb"),
+        lambda: ro_client.limit_sell("BTC", "0.01", "90000", client_intent_id="cid-ls"),
+    ):
+        with pytest.raises(PermissionError, match="NO-GO"):
+            call()
+
+    recorded = []
+
+    def response(method, url, json=None, **_kwargs):
+        recorded.append((method, url, json))
+        res = requests.Response()
+        res.status_code = 200
+        if method == "GET":
+            res._content = b'{"data":[{"positionSide":"long","quantity":"0.01"}]}'
+        else:
+            res._content = b'{"data":[{"orderId":"o1"}]}'
+        return res
+
+    syn_client = ProprClient(
+        api_key="fixture",
+        base_url="https://fixture.invalid/v1",
+        synthetic_transport=SyntheticTransport(response),
+    )
+    syn_client.account_id = "fixture-account"
+    syn_client.market_buy("BTC", "0.01", client_intent_id="cid-1")
+    syn_client.market_sell("BTC", "0.02", client_intent_id="cid-ms")
+    syn_client.limit_buy("BTC", "0.03", "79000", client_intent_id="cid-lb")
+    syn_client.limit_sell("BTC", "0.01", "90000", client_intent_id="cid-2")
+    syn_client.close_position("BTC", client_intent_id="cid-3")
+    post_payloads = [body for method, _url, body in recorded if method == "POST"]
+    assert [p["orders"][0]["intentId"] for p in post_payloads] == [
+        "cid-1", "cid-ms", "cid-lb", "cid-2", "cid-3",
+    ]
+    assert post_payloads[1]["orders"][0]["side"] == "sell"
+    assert post_payloads[2]["orders"][0]["type"] == "limit"
+
+
+def test_close_position_empty_and_short_set_leverage_and_batch_guards():
+    calls = []
+    positions_queue = [[], [{"positionSide": "short", "quantity": "0.05"}]]
+
+    def response(method, url, json=None, **_kwargs):
+        calls.append((method, url, json))
+        res = requests.Response()
+        res.status_code = 200
+        if method == "GET" and "/positions" in url:
+            res._content = b_json({"data": positions_queue.pop(0)})
+        elif method == "GET" and "/margin-config/" in url:
+            res._content = b'{"configId":"cfg-1"}'
+        else:
+            res._content = b'{"data":{"configId":"cfg-1","leverage":3}}'
+        return res
+
+    def b_json(obj):
+        return json.dumps(obj).encode()
+
+    client = ProprClient(
+        api_key="fixture",
+        base_url="https://fixture.invalid/v1",
+        synthetic_transport=SyntheticTransport(response),
+    )
+    client.account_id = "fixture-account"
+    assert client.close_position("BTC", client_intent_id="cid-empty") == []
+    assert not any(m == "POST" for m, _u, _j in calls)
+
+    client.close_position("BTC", client_intent_id="cid-short")
+    short_close = calls[-1][2]["orders"][0]
+    assert short_close["side"] == "buy"
+    assert short_close["positionSide"] == "short"
+    assert short_close["reduceOnly"] is True
+
+    client.set_leverage("BTC", 3, margin_mode="isolated")
+    put_method, put_url, put_body = calls[-1]
+    assert put_method == "PUT"
+    assert put_url.endswith("/accounts/fixture-account/margin-config/cfg-1")
+    assert put_body["leverage"] == 3
+    assert put_body["marginMode"] == "isolated"
+
+    with pytest.raises(ValueError, match="Cross-account"):
+        client.create_orders([{"accountId": "other", "intentId": "i-1", "quantity": "0.1"}])
+    with pytest.raises(ValueError, match="Duplicate"):
+        client.create_orders([
+            {"intentId": "same", "quantity": "0.1"},
+            {"intentId": "same", "quantity": "0.2"},
+        ])
+
+
+def test_request_path_and_synthetic_transport_guards():
+    with pytest.raises(PermissionError, match="fixture-only"):
+        ProprClient(
+            api_key="pk_live_secret",
+            base_url="https://fixture.invalid/v1",
+            synthetic_transport=SyntheticTransport(lambda *_a, **_kw: None),
+        )
+    with pytest.raises(PermissionError, match="fixture-only"):
+        ProprClient(
+            api_key="fixture",
+            base_url="https://api.propr.xyz/v1",
+            synthetic_transport=SyntheticTransport(lambda *_a, **_kw: None),
+        )
+
+    client = ProprClient(api_key="pk_live_test", base_url="https://api.propr.xyz/v1")
+    for bad_path in ("https://evil.com/x", "//evil.com/x", "/accounts/../etc/passwd"):
+        with pytest.raises(ValueError, match="Relative bound API path required"):
+            client._request("GET", bad_path)

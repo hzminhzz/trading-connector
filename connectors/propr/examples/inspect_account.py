@@ -3,15 +3,12 @@ import argparse
 import asyncio
 import os
 
-try:
-    from dotenv import load_dotenv
-    load_dotenv()
-except ImportError:
-    pass
-
+from connectors.common.config import load_env_file
 from connectors.propr.account import ReadOnlyAccount
 from connectors.propr.config import Environment, ProprConfig
 from connectors.propr.inventory import InventoryReader
+
+load_env_file()
 
 
 async def main():

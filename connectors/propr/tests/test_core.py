@@ -3,7 +3,6 @@ import pytest
 from connectors.propr.instruments import Instrument, InstrumentRegistry
 from connectors.propr.models import Position, one_way_positions, Order, OrderStatus
 from connectors.propr.state import IntentJournal, UnknownOutcome
-from connectors.propr.risk import RiskGate, RiskSnapshot
 
 def test_case_sensitive_roundtrip():
     registry = InstrumentRegistry([Instrument("HIP3-AAPL", "xyz:AAPL", D(".01"), D(".01"), D(".01"))])
@@ -38,17 +37,3 @@ def test_journal_recovery_freezes_openings(tmp_path):
     journal.mark(intent.id, "reconciled")
     assert not journal.has_unknown()
     journal.close()
-
-def test_risk_requires_manual_reset():
-    gate = RiskGate(D("3"), D("100"))
-    snapshot = RiskSnapshot(D("1000"), D("500"), D("2"), D("0"), True, True, True)
-    with pytest.raises(PermissionError):
-        gate.evaluate(snapshot)
-    with pytest.raises(PermissionError):
-        gate.reset(manual_approval=False, reconciled=True)
-    gate.reset(manual_approval=True, reconciled=True)
-    assert gate.evaluate(snapshot)
-    with pytest.raises(PermissionError):
-        gate.evaluate(RiskSnapshot(None, D("500"), D("2"), D("0"), True, True, True))
-    with pytest.raises(PermissionError):
-        gate.evaluate(snapshot)

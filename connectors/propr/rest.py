@@ -1,17 +1,14 @@
 """Async read-only Propr REST transport. All network mutations fail before I/O."""
 from dataclasses import dataclass
 from decimal import Decimal
-import json
 from typing import Any
 import httpx
+
+from connectors.common.validation import finite_json_loads, validate_relative_api_path
 
 
 class RemoteAPIError(RuntimeError):
     """Redacted provider error; never include response bodies or auth headers."""
-
-
-def _reject_nonfinite_json_token(_value: str):
-    raise ValueError("Non-finite provider JSON token")
 
 
 class ProviderHTTPError(RemoteAPIError):
@@ -65,8 +62,7 @@ class ProprRest:
 
     async def request(self, method: str, path: str, **kwargs) -> Any:
         self.policy.check(method)
-        if not isinstance(path, str) or not path.startswith("/") or "//" in path or ".." in path:
-            raise ValueError("Relative API path required")
+        validate_relative_api_path(path)
         if "headers" in kwargs or "auth" in kwargs or "json" in kwargs or "data" in kwargs:
             raise PermissionError("Read-only request cannot override credentials or send a body")
         try:
@@ -74,10 +70,8 @@ class ProprRest:
             response.raise_for_status()
             if method.upper() == "HEAD" or response.status_code == 204:
                 return {}
-            # json.Response.json() rounds JSON fractional tokens to binary floats before
-            # financial-field validation can observe them. Preserve exact lexemes.
-            return json.loads(response.content, parse_float=Decimal,
-                              parse_constant=_reject_nonfinite_json_token)
+            # Preserve exact JSON numeric lexemes instead of rounding to binary floats.
+            return finite_json_loads(response.content, parse_float=Decimal)
         except httpx.TimeoutException as exc:
             raise RemoteAPIError("Provider timeout; outcome not inferred") from exc
         except httpx.HTTPStatusError as exc:

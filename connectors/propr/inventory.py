@@ -7,7 +7,9 @@ from dataclasses import dataclass
 from decimal import Decimal
 from urllib.parse import quote
 
-from .models import Order, OrderStatus, Position, finite_decimal, one_way_positions
+from connectors.common.validation import optional_strict_decimal, strict_decimal
+
+from .models import Order, OrderStatus, Position, one_way_positions, validate_account_id
 from .rest import RemoteAPIError
 
 
@@ -53,14 +55,15 @@ def _required(row, *keys):
 
 
 def _decimal(value):
-    try:
-        return finite_decimal(value)
-    except ValueError as exc:
-        raise RemoteAPIError("Invalid provider decimal") from exc
+    return strict_decimal(value, error_cls=lambda _msg: RemoteAPIError("Invalid provider decimal"))
 
 
 def _optional_decimal(row, name):
-    return _decimal(row[name]) if row.get(name) is not None else None
+    return optional_strict_decimal(
+        row.get(name),
+        name,
+        error_cls=lambda _msg: RemoteAPIError("Invalid provider decimal"),
+    )
 
 
 def parse_order(row):
@@ -128,17 +131,13 @@ def parse_trade(row):
 
 class InventoryReader:
     def __init__(self, rest, account_id: str | None = None):
-        if account_id is not None and (
-            not isinstance(account_id, str) or not account_id.strip() or "/" in account_id
-        ):
-            raise ValueError("Invalid account ID")
+        validate_account_id(account_id, allow_none=True)
         self.rest = rest
         self.account_id = account_id
 
     async def snapshot(self, account_id: str | None = None):
         account_id = self.account_id if account_id is None else account_id
-        if not isinstance(account_id, str) or not account_id.strip() or "/" in account_id:
-            raise ValueError("Explicit valid account ID required")
+        validate_account_id(account_id, message="Explicit valid account ID required")
         base = f"/accounts/{quote(account_id, safe='')}"
         orders = tuple(parse_order(x) for x in await self.rest.pages(f"{base}/orders"))
         positions = tuple(parse_position(x) for x in await self.rest.pages(f"{base}/positions"))

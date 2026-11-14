@@ -69,6 +69,21 @@ def demo_config():
     )
 
 
+@pytest.fixture
+def demo_safe_broker(exchange, demo_config, tmp_path):
+    broker = BybitLiveBroker(
+        client=BybitClient(demo_config, exchange=exchange),
+        journal=BybitIntentJournal(":memory:"),
+    )
+    safe = SafeBroker(broker, LiveRiskConfig(
+        execution_mode="paper", fail_on_reconciliation_mismatch=True,
+        state_file=tmp_path / "native_risk.json",
+    ))
+    yield broker, safe
+    safe.close_persistence()
+    broker.journal.close()
+
+
 def test_authenticated_demo_contract_and_account_wide_usd_totals(exchange, demo_config):
     client = BybitClient(demo_config, exchange=exchange)
     async def run():
@@ -131,35 +146,25 @@ def test_demo_wallet_missing_usd_field_is_blocked(exchange, demo_config):
     asyncio.run(run())
 
 
-def test_native_read_only_preflight_and_no_mutations(exchange, demo_config, tmp_path):
-    client = BybitClient(demo_config, exchange=exchange)
-    broker = BybitLiveBroker(client=client, journal=BybitIntentJournal(":memory:"))
+def test_native_read_only_preflight_and_no_mutations(exchange, demo_safe_broker):
+    broker, safe = demo_safe_broker
     assert isinstance(broker, AsyncBrokerProtocol)
-    config = LiveRiskConfig(
-        execution_mode="paper", fail_on_reconciliation_mismatch=True,
-        state_file=tmp_path / "native_risk.json",
-    )
-    safe = SafeBroker(broker, config)
-    try:
-        asyncio.run(broker.connect())
-        assert broker.is_connected is True
-        assert asyncio.run(broker.get_account_value_async()) == 5000.10
-        assert asyncio.run(broker.get_positions_async()) == {}
-        assert asyncio.run(broker.get_pending_orders_async()) == []
-        with pytest.raises(ValueError, match="cash is unverified"):
-            asyncio.run(safe.preflight_async())
-        assert client.preflight_identity_evidence["authenticated_uid_matches_expected"]
-        assert safe.persistence_status["state_error"] is None
-        assert safe.persistence_status["journal_error"] is None
-    finally:
-        safe.close_persistence()
-        broker.journal.close()
+    asyncio.run(broker.connect())
+    assert broker.is_connected is True
+    assert asyncio.run(broker.get_account_value_async()) == 5000.10
+    assert asyncio.run(broker.get_positions_async()) == {}
+    assert asyncio.run(broker.get_pending_orders_async()) == []
+    with pytest.raises(ValueError, match="cash is unverified"):
+        asyncio.run(safe.preflight_async())
+    assert broker.client.preflight_identity_evidence["authenticated_uid_matches_expected"]
+    assert safe.persistence_status["state_error"] is None
+    assert safe.persistence_status["journal_error"] is None
     exchange.create_order.assert_not_awaited()
     exchange.cancel_order.assert_not_awaited()
     exchange.edit_order.assert_not_awaited()
 
 
-def test_native_preflight_reports_unexpected_pending_order_without_mutating(exchange, demo_config, tmp_path):
+def test_native_preflight_reports_unexpected_pending_order_without_mutating(exchange, demo_safe_broker):
     order = {
         "orderId": "synthetic-order", "orderLinkId": "client-ref",
         "symbol": "BTCUSDT", "side": "Buy", "orderType": "Limit",
@@ -171,22 +176,13 @@ def test_native_preflight_reports_unexpected_pending_order_without_mutating(exch
     exchange.private_get_v5_order_realtime.side_effect = lambda params: v5(
         params["category"], [order] if params.get("settleCoin") == "USDT" else []
     )
-    client = BybitClient(demo_config, exchange=exchange)
-    broker = BybitLiveBroker(client=client, journal=BybitIntentJournal(":memory:"))
-    safe = SafeBroker(broker, LiveRiskConfig(
-        execution_mode="paper", fail_on_reconciliation_mismatch=True,
-        state_file=tmp_path / "native_risk.json",
-    ))
-    try:
-        asyncio.run(broker.connect())
-        pending = asyncio.run(broker.get_pending_orders_async())
-        assert len(pending) == 1
-        assert pending[0].quantity == 0.02
-        with pytest.raises(ValueError, match="cash is unverified"):
-            asyncio.run(safe.preflight_async())
-    finally:
-        safe.close_persistence()
-        broker.journal.close()
+    broker, safe = demo_safe_broker
+    asyncio.run(broker.connect())
+    pending = asyncio.run(broker.get_pending_orders_async())
+    assert len(pending) == 1
+    assert pending[0].quantity == 0.02
+    with pytest.raises(ValueError, match="cash is unverified"):
+        asyncio.run(safe.preflight_async())
     exchange.create_order.assert_not_awaited()
     exchange.cancel_order.assert_not_awaited()
     exchange.edit_order.assert_not_awaited()
@@ -233,7 +229,7 @@ def test_demo_positions_all_pages_and_scope_validation(exchange, demo_config):
 
 
 def test_native_preflight_sees_nonempty_demo_position_without_duplicate_aliases(
-    exchange, demo_config, tmp_path,
+    exchange, demo_safe_broker,
 ):
     position = {
         "symbol": "BTCUSDT", "side": "Buy", "size": "0.02",
@@ -243,24 +239,13 @@ def test_native_preflight_sees_nonempty_demo_position_without_duplicate_aliases(
     exchange.private_get_v5_position_list.side_effect = lambda params: v5(
         params["category"], [position] if params.get("settleCoin") == "USDT" else []
     )
-    broker = BybitLiveBroker(
-        client=BybitClient(demo_config, exchange=exchange),
-        journal=BybitIntentJournal(":memory:"),
-    )
-    safe = SafeBroker(broker, LiveRiskConfig(
-        execution_mode="paper", fail_on_reconciliation_mismatch=True,
-        state_file=tmp_path / "native_risk.json",
-    ))
-    try:
-        asyncio.run(broker.connect())
-        positions = asyncio.run(broker.get_positions_async())
-        assert set(positions) == {"BTC/USDT:USDT"}
-        assert positions["BTC/USDT:USDT"].quantity == 0.02
-        with pytest.raises(ValueError, match="cash is unverified"):
-            asyncio.run(safe.preflight_async())
-    finally:
-        safe.close_persistence()
-        broker.journal.close()
+    broker, safe = demo_safe_broker
+    asyncio.run(broker.connect())
+    positions = asyncio.run(broker.get_positions_async())
+    assert set(positions) == {"BTC/USDT:USDT"}
+    assert positions["BTC/USDT:USDT"].quantity == 0.02
+    with pytest.raises(ValueError, match="cash is unverified"):
+        asyncio.run(safe.preflight_async())
     exchange.create_order.assert_not_awaited()
 
 

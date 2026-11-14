@@ -3,13 +3,9 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 
 from connectors.bybit.client import BybitClient
 from connectors.bybit.config import BybitConfig
-
-logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
-logger = logging.getLogger("bybit_inspect")
 
 
 async def main() -> None:
@@ -26,7 +22,6 @@ async def main() -> None:
         markets_count = len(client.exchange.markets) if client.exchange.markets else 0
         print(f"Markets Loaded: {markets_count}")
 
-        # Check public ticker
         ticker = await client.exchange.fetch_ticker("BTC/USDT:USDT")
         print(f"Public BTC/USDT:USDT Mark Price: ${float(ticker.get('last', 0) or 0):,.2f}")
 

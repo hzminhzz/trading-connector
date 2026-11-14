@@ -14,7 +14,7 @@ Usage:
 import os
 import re
 from dataclasses import dataclass
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from typing import Any, Callable
 from urllib.parse import urlsplit
 
@@ -106,8 +106,6 @@ class ProprClient:
                 "Get your key at https://app.propr.xyz/settings"
             )
 
-    # ── Internal ──
-
     def _request(
         self,
         method: str,
@@ -162,8 +160,6 @@ class ProprClient:
             )
         return f"/accounts/{self.account_id}{suffix}"
 
-    # ── Setup ──
-
     def setup(self, account_id: str | None = None) -> str:
         """
         Initialize the client with an account ID.
@@ -189,8 +185,6 @@ class ProprClient:
         self.account_id = attempts[0]["accountId"]
         return self.account_id
 
-    # ── Health ──
-
     def health(self) -> dict:
         """
         Check API health.
@@ -209,8 +203,6 @@ class ProprClient:
         """
         return self._get("/health/services")
 
-    # ── User ──
-
     def get_user(self) -> dict:
         """
         Get the current authenticated user's profile.
@@ -219,8 +211,6 @@ class ProprClient:
             User profile dict with userId, email, name, etc.
         """
         return self._get("/users/me")
-
-    # ── Account ──
 
     def get_account(self) -> dict:
         """
@@ -231,8 +221,6 @@ class ProprClient:
         """
         res = self._get(self._account_path(""))
         return res.get("data", res)
-
-    # ── Challenges ──
 
     def get_challenges(
         self,
@@ -268,8 +256,6 @@ class ProprClient:
             params["exchange"] = exchange
 
         return self._get("/challenges", params=params).get("data", [])
-
-    # ── Challenge Attempts ──
 
     def get_challenge_attempts(
         self,
@@ -313,8 +299,6 @@ class ProprClient:
             Attempt dict.
         """
         return self._get(f"/challenge-attempts/{attempt_id}")
-
-    # ── Orders ──
 
     def get_orders(
         self,
@@ -502,8 +486,6 @@ class ProprClient:
                 cancelled.append(result)
         return cancelled
 
-    # ── Positions ──
-
     def get_positions(
         self,
         position_id: str | None = None,
@@ -550,7 +532,20 @@ class ProprClient:
         positions = self._get(self._account_path("/positions"), params=params).get("data", [])
 
         if exclude_zero:
-            positions = [p for p in positions if Decimal(p.get("quantity", "0")) > 0]
+            filtered = []
+            for p in positions:
+                raw_qty = p.get("quantity", "0")
+                if isinstance(raw_qty, bool) or raw_qty is None:
+                    raise ValueError(f"Invalid position quantity: {raw_qty!r}")
+                try:
+                    qty = Decimal(str(raw_qty))
+                except (InvalidOperation, ValueError, TypeError) as exc:
+                    raise ValueError(f"Invalid position quantity: {raw_qty!r}") from exc
+                if not qty.is_finite():
+                    raise ValueError(f"Non-finite position quantity: {raw_qty!r}")
+                if qty > 0:
+                    filtered.append(p)
+            positions = filtered
 
         return positions
 
@@ -565,8 +560,6 @@ class ProprClient:
             List of open position dicts.
         """
         return self.get_positions(base=base, status="open", exclude_zero=True)
-
-    # ── Trades ──
 
     def get_trades(
         self,
@@ -611,8 +604,6 @@ class ProprClient:
 
         return self._get(self._account_path("/trades"), params=params).get("data", [])
 
-    # ── Margin Configuration ──
-
     def get_margin_config(self, asset: str) -> dict:
         """
         Get margin configuration for a specific asset.
@@ -654,8 +645,6 @@ class ProprClient:
             },
         )
 
-    # ── Leverage Limits ──
-
     def get_leverage_limits(self) -> dict:
         """
         Get effective leverage limits for all assets. No auth required.
@@ -678,13 +667,13 @@ class ProprClient:
         limits = self.get_leverage_limits()
         return limits.get("overrides", {}).get(asset, limits.get("defaultMax", 2))
 
-    # ── Convenience Methods ──
-
     def market_buy(
         self,
         base: str,
         quantity: str,
         quote: str = "USDC",
+        *,
+        client_intent_id: str | None = None,
     ) -> list[dict]:
         """
         Place a market buy (long) order.
@@ -693,6 +682,7 @@ class ProprClient:
             base: Base asset (e.g. "BTC").
             quantity: Order quantity.
             quote: Quote asset (default "USDC").
+            client_intent_id: Persisted caller intent ID.
 
         Returns:
             List of created order dicts.
@@ -705,6 +695,7 @@ class ProprClient:
             base=base,
             quote=quote,
             quantity=quantity,
+            client_intent_id=client_intent_id,
         )
 
     def market_sell(
@@ -713,6 +704,8 @@ class ProprClient:
         quantity: str,
         quote: str = "USDC",
         reduce_only: bool = True,
+        *,
+        client_intent_id: str | None = None,
     ) -> list[dict]:
         """
         Place a market sell (close long) order.
@@ -722,6 +715,7 @@ class ProprClient:
             quantity: Order quantity.
             quote: Quote asset (default "USDC").
             reduce_only: Safety flag (default True).
+            client_intent_id: Persisted caller intent ID.
 
         Returns:
             List of created order dicts.
@@ -735,6 +729,7 @@ class ProprClient:
             quote=quote,
             quantity=quantity,
             reduce_only=reduce_only,
+            client_intent_id=client_intent_id,
         )
 
     def limit_buy(
@@ -743,6 +738,8 @@ class ProprClient:
         quantity: str,
         price: str,
         quote: str = "USDC",
+        *,
+        client_intent_id: str | None = None,
     ) -> list[dict]:
         """
         Place a limit buy (long) order.
@@ -752,6 +749,7 @@ class ProprClient:
             quantity: Order quantity.
             price: Limit price.
             quote: Quote asset (default "USDC").
+            client_intent_id: Persisted caller intent ID.
 
         Returns:
             List of created order dicts.
@@ -765,6 +763,7 @@ class ProprClient:
             quote=quote,
             quantity=quantity,
             price=price,
+            client_intent_id=client_intent_id,
         )
 
     def limit_sell(
@@ -774,6 +773,8 @@ class ProprClient:
         price: str,
         quote: str = "USDC",
         reduce_only: bool = True,
+        *,
+        client_intent_id: str | None = None,
     ) -> list[dict]:
         """
         Place a limit sell (close long) order.
@@ -784,6 +785,7 @@ class ProprClient:
             price: Limit price.
             quote: Quote asset (default "USDC").
             reduce_only: Safety flag (default True).
+            client_intent_id: Persisted caller intent ID.
 
         Returns:
             List of created order dicts.
@@ -798,9 +800,16 @@ class ProprClient:
             quantity=quantity,
             price=price,
             reduce_only=reduce_only,
+            client_intent_id=client_intent_id,
         )
 
-    def close_position(self, base: str, quote: str = "USDC") -> list[dict]:
+    def close_position(
+        self,
+        base: str,
+        quote: str = "USDC",
+        *,
+        client_intent_id: str | None = None,
+    ) -> list[dict]:
         """
         Close an entire position on an asset.
 
@@ -809,6 +818,7 @@ class ProprClient:
         Args:
             base: Base asset (e.g. "BTC").
             quote: Quote asset (default "USDC").
+            client_intent_id: Persisted caller intent ID.
 
         Returns:
             List of created order dicts, or empty if no position found.
@@ -830,6 +840,7 @@ class ProprClient:
             quantity=pos["quantity"],
             reduce_only=True,
             close_position=True,
+            client_intent_id=client_intent_id,
         )
 
     def set_leverage(self, asset: str, leverage: int, margin_mode: str = "cross") -> dict:

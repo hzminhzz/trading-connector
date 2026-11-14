@@ -13,8 +13,10 @@ from hashlib import sha256
 import json
 from pathlib import Path
 import re
-import sqlite3
 import stat
+
+from connectors.common.intents import open_wal_sqlite
+from connectors.common.validation import strict_decimal
 
 _SHA = re.compile(r"[0-9a-f]{64}\Z")
 _ACCOUNT_ALIAS = "#JhW9"
@@ -29,12 +31,7 @@ def _blob(value: object) -> bytes:
 
 
 def _finite(value: object) -> Decimal:
-    if isinstance(value, bool):
-        raise ValueError("INVALID_PAPER_AMOUNT")
-    number = Decimal(str(value))
-    if not number.is_finite():
-        raise ValueError("INVALID_PAPER_AMOUNT")
-    return number
+    return strict_decimal(value, error_cls=lambda _msg: ValueError("INVALID_PAPER_AMOUNT"))
 
 
 def _safe_paper_action(action: dict) -> None:
@@ -92,9 +89,7 @@ class Combo2PaperProjection:
             raise ValueError("PAPER_SQLITE_NOT_PRIVATE")
         if not self.path.exists():
             raise FileNotFoundError("CREATE_INTENT_JOURNAL_SEPARATELY")
-        self.connection = sqlite3.connect(self.path)
-        self.connection.execute("PRAGMA journal_mode=WAL")
-        self.connection.execute("PRAGMA synchronous=FULL")
+        self.connection = open_wal_sqlite(self.path, synchronous="FULL")
         # Existing IntentJournal broker-intent tables are authoritative and
         # completely untouched by this paper-only projection.
         names = {

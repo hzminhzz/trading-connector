@@ -1,26 +1,17 @@
 """ATS-7 provider-boundary regressions. No credentials or network orders."""
 import asyncio
 from decimal import Decimal
-from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from connectors.bybit.broker import BybitLiveBroker
-from connectors.bybit.config import BybitConfig, Environment, Mode
 from connectors.bybit.journal import BybitIntentJournal, UnknownOutcome
-from connectors.bybit.models import BybitBalance, BybitOrderData
+from connectors.ccxt_support.tests.conftest import BYBIT_SPEC, make_mock_provider_client
 
 
 def fixture(tmp_path):
-    client = MagicMock()
-    client.config = BybitConfig(Environment.TESTNET, Mode.EXECUTION, api_key="fixture", api_secret="fixture")
-    for name in ("connect", "close", "fetch_balance", "fetch_positions", "fetch_open_orders",
-                 "create_order", "cancel_order"):
-        setattr(client, name, AsyncMock())
-    client.fetch_balance.return_value = {"USDT": BybitBalance("USDT", Decimal("5000"), Decimal("4500"), Decimal("500"), {})}
-    client.fetch_positions.return_value = []
-    client.fetch_open_orders.return_value = []
-    client.create_order.return_value = BybitOrderData(
+    client = make_mock_provider_client(BYBIT_SPEC)
+    client.create_order.return_value = BYBIT_SPEC.order_cls(
         order_id="observed-provider-id", client_order_id=None, symbol="BTC/USDT:USDT",
         side="buy", order_type="market", price=Decimal("80000"), quantity=Decimal("0.001"),
         filled_quantity=Decimal("0"), status="open", timestamp=1700000000000, raw={})
@@ -79,23 +70,6 @@ def test_native_reducing_risk_is_provider_reduce_only(tmp_path):
         broker.journal.close()
 
 
-def test_cancel_ack_keeps_pending_obligation(tmp_path):
-    broker, client = fixture(tmp_path)
-    client.fetch_open_orders.return_value = [client.create_order.return_value]
-    client.cancel_order.return_value = True
-    async def run():
-        await broker.connect()
-        assert len(broker.pending_orders) == 1
-        assert await broker.cancel_order_async("observed-provider-id")
-        # Provider still reports the open order. ACK cannot erase that fact.
-        assert len(broker.pending_orders) == 1
-        assert len(await broker.get_pending_orders_async()) == 1
-    try:
-        asyncio.run(run())
-    finally:
-        broker.journal.close()
-
-
 def test_after_acceptance_snapshot_failure_is_unknown(tmp_path):
     broker, client = fixture(tmp_path)
     async def run():
@@ -103,9 +77,9 @@ def test_after_acceptance_snapshot_failure_is_unknown(tmp_path):
         client.fetch_positions.side_effect = RuntimeError("snapshot unavailable")
         with pytest.raises(RuntimeError):
             await broker.submit_order_async("BTC/USDT:USDT", 0.001, intent_idempotency_key="accepted")
-        row = broker.journal.connection.execute(
-            "SELECT state,exchange_order_id FROM intents WHERE id='accepted'").fetchone()
-        assert row == ("unknown", "observed-provider-id")
+        record = broker.journal.get("accepted")
+        assert record is not None
+        assert (record.state, record.exchange_order_id) == ("unknown", "observed-provider-id")
     try:
         asyncio.run(run())
     finally:

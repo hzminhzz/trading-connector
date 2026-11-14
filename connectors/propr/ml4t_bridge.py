@@ -8,6 +8,13 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
+from connectors.common.validation import (
+    exact_decimal_sum,
+    optional_strict_decimal,
+    parse_utc_iso,
+    strict_decimal,
+)
+
 from .execution import OrderRequest
 from .models import OrderStatus as NativeStatus, one_way_positions
 from .state import IntentJournal, UnknownOutcome, new_ulid
@@ -26,10 +33,7 @@ except ImportError:
 try:
     from propr_sdk import ProprClient
 except ImportError:
-    try:
-        from .sdk import ProprClient
-    except ImportError:
-        ProprClient = None
+    ProprClient = None
 
 def _require_ml4t():
     if AsyncBrokerProtocol is None:
@@ -39,10 +43,20 @@ def _require_ml4t():
 def _time(value):
     if not value:
         raise UnknownOutcome("Native position missing entry timestamp")
-    try:
-        return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(UTC)
-    except ValueError as exc:
-        raise UnknownOutcome("Invalid native position timestamp") from exc
+    return parse_utc_iso(value, "timestamp", error_cls=UnknownOutcome)
+
+
+def _resolve_quantity_and_side(quantity: float, side: Any | None) -> tuple[Decimal, Any]:
+    magnitude = Decimal(str(quantity))
+    if not magnitude.is_finite() or magnitude == 0:
+        raise ValueError("Quantity must be finite and nonzero")
+    if side is None:
+        actual_side = OrderSide.BUY if magnitude > 0 else OrderSide.SELL
+    else:
+        actual_side = OrderSide(side)
+        if magnitude < 0:
+            raise ValueError("Negative quantity with explicit side is ambiguous")
+    return abs(magnitude), actual_side
 
 
 class _TargetOrderFacade:
@@ -237,16 +251,7 @@ class ML4TShadowBroker:
         order_type = OrderType.MARKET if order_type is None else OrderType(order_type)
         if order_type not in (OrderType.MARKET, OrderType.LIMIT):
             raise ValueError("Unsupported order type")
-        magnitude = Decimal(str(quantity))
-        if not magnitude.is_finite() or magnitude == 0:
-            raise ValueError("Quantity must be finite and nonzero")
-        if side is None:
-            actual_side = OrderSide.BUY if magnitude > 0 else OrderSide.SELL
-        else:
-            actual_side = OrderSide(side)
-            if magnitude < 0:
-                raise ValueError("Negative quantity with explicit side is ambiguous")
-        qty = abs(magnitude)
+        qty, actual_side = _resolve_quantity_and_side(quantity, side)
         current = self.positions.get(asset)
         reduce_only = bool(current and (
             (current.quantity > 0 and actual_side is OrderSide.SELL)
@@ -364,67 +369,100 @@ class ProprLiveBroker:
         raise PermissionError("Propr remote execution is disabled at SDK HTTP boundary")
     async def _sync_state(self) -> None:
         raw_positions = await asyncio.to_thread(self.client.get_open_positions)
-        new_positions = {}
+        new_positions: dict[str, Any] = {}
         for p in raw_positions:
+            qty = strict_decimal(p.get("quantity"), "quantity", error_cls=UnknownOutcome)
+            if qty < 0:
+                raise UnknownOutcome(f"Negative native position quantity: {qty}")
+            if qty == 0:
+                continue
             asset = p.get("asset") or f"{p.get('base')}/{p.get('quote', 'USDC')}"
-            qty = float(p.get("quantity", 0))
-            if p.get("positionSide") == "short":
-                qty = -abs(qty)
-            entry_px = float(p.get("entryPrice") or 0.0)
-            mark_px = float(p.get("markPrice") or entry_px)
-            created_str = p.get("createdAt") or datetime.now(UTC).isoformat()
-            base_sym = p.get("base") or (asset.split("/")[0] if "/" in asset else asset)
+            if "/" not in asset:
+                asset = f"{asset}/{p.get('quote', 'USDC')}"
+            if asset in new_positions:
+                raise UnknownOutcome(f"Conflicting/hedge positions for {asset}")
+            pos_side = str(p.get("positionSide", "")).lower()
+            if pos_side not in ("long", "short"):
+                raise UnknownOutcome(f"Unsupported native positionSide: {pos_side!r}")
+            signed_qty = -float(qty) if pos_side == "short" else float(qty)
+            entry_px = strict_decimal(p.get("entryPrice"), "entryPrice", error_cls=UnknownOutcome)
+            mark_px = (
+                strict_decimal(p.get("markPrice"), "markPrice", error_cls=UnknownOutcome)
+                if p.get("markPrice") is not None
+                else entry_px
+            )
+            created_at = _time(p.get("createdAt"))
             pos = Position(
                 asset=asset,
-                quantity=qty,
-                entry_price=entry_px,
-                entry_time=_time(created_str),
-                current_price=mark_px,
+                quantity=signed_qty,
+                entry_price=float(entry_px),
+                entry_time=created_at,
+                current_price=float(mark_px),
             )
             pos._position_id = p.get("positionId")
             new_positions[asset] = pos
-            new_positions[base_sym] = pos
         self._positions = new_positions
 
         raw_orders = await asyncio.to_thread(self.client.get_orders, status="open")
         self._pending_orders = [self._parse_order(o) for o in raw_orders]
-
-        if hasattr(self.client, "get_account"):
-            self._account_data = await asyncio.to_thread(self.client.get_account)
-        else:
-            acc = await asyncio.to_thread(self.client._get, self.client._account_path(""))
-            self._account_data = acc.get("data", acc) if isinstance(acc, dict) else {}
+        self._account_data = await asyncio.to_thread(self.client.get_account)
 
     def _parse_order(self, o: dict[str, Any]) -> Any:
         raw_asset = str(o.get("asset") or o.get("base") or "")
         quote = o.get("quote") or "USDC"
         asset = f"{raw_asset}/{quote}" if "/" not in raw_asset else raw_asset
-        side = OrderSide.BUY if o.get("side", "").lower() == "buy" else OrderSide.SELL
-        order_type = OrderType.LIMIT if o.get("type", "").lower() == "limit" else OrderType.MARKET
-        price = float(o["price"]) if o.get("price") is not None else None
-        status_str = o.get("status", "").lower()
-        if status_str in ("open", "pending"):
+        side_str = str(o.get("side", "")).lower()
+        if side_str not in ("buy", "sell"):
+            raise UnknownOutcome(f"Unsupported order side: {side_str!r}")
+        side = OrderSide.BUY if side_str == "buy" else OrderSide.SELL
+        type_str = str(o.get("type", "")).lower()
+        type_map = {
+            "market": OrderType.MARKET,
+            "limit": OrderType.LIMIT,
+            "stop": OrderType.STOP,
+            "stop_market": OrderType.STOP,
+            "stop_limit": OrderType.STOP_LIMIT,
+        }
+        if type_str not in type_map:
+            raise UnknownOutcome(f"Unsupported order type: {type_str!r}")
+        order_type = type_map[type_str]
+        order_id = o.get("orderId")
+        if not isinstance(order_id, str) or not order_id.strip():
+            raise UnknownOutcome(f"Missing or invalid orderId: {order_id!r}")
+        price_dec = optional_strict_decimal(o.get("price"), "price", error_cls=UnknownOutcome)
+        price = float(price_dec) if price_dec is not None else None
+        status_str = str(o.get("status", "")).lower()
+        if status_str in ("open", "pending", "partially_filled"):
             status = ML4TOrderStatus.PENDING
-        elif status_str in ("filled",):
+        elif status_str == "filled":
             status = ML4TOrderStatus.FILLED
-        elif status_str in ("cancelled", "canceled"):
+        elif status_str in ("cancelled", "canceled", "expired"):
             status = ML4TOrderStatus.CANCELLED
-        elif status_str in ("rejected",):
+        elif status_str == "rejected":
             status = ML4TOrderStatus.REJECTED
         else:
-            status = ML4TOrderStatus.PENDING
-        created_at = _time(o.get("createdAt")) if o.get("createdAt") else datetime.now(UTC)
+            raise UnknownOutcome(f"Unsupported order status: {status_str!r}")
+        created_at = _time(o.get("createdAt"))
+        qty_dec = strict_decimal(o.get("quantity"), "quantity", error_cls=UnknownOutcome)
+        filled_dec = (
+            strict_decimal(o.get("cumulativeQuantity"), "cumulativeQuantity", error_cls=UnknownOutcome)
+            if o.get("cumulativeQuantity") is not None
+            else Decimal("0")
+        )
+        avg_fill = optional_strict_decimal(
+            o.get("averageFillPrice"), "averageFillPrice", error_cls=UnknownOutcome
+        )
         return Order(
             asset=asset,
             side=side,
-            quantity=float(o.get("quantity", 0)),
+            quantity=float(qty_dec),
             order_type=order_type,
             limit_price=price,
-            order_id=str(o.get("orderId", "")),
+            order_id=order_id,
             status=status,
             created_at=created_at,
-            filled_quantity=float(o.get("cumulativeQuantity", 0)),
-            filled_price=float(o["averageFillPrice"]) if o.get("averageFillPrice") else None,
+            filled_quantity=float(filled_dec),
+            filled_price=float(avg_fill) if avg_fill is not None else None,
         )
 
     async def get_positions_async(self) -> dict[str, Any]:
@@ -433,7 +471,11 @@ class ProprLiveBroker:
 
     async def get_position_async(self, asset: str) -> Any | None:
         positions = await self.get_positions_async()
-        return positions.get(asset)
+        if asset in positions:
+            return positions[asset]
+        if "/" not in asset:
+            return positions.get(f"{asset}/USDC")
+        return None
 
     async def get_pending_orders_async(self, asset: str | None = None) -> list[Any]:
         await self._sync_state()
@@ -447,20 +489,48 @@ class ProprLiveBroker:
 
     async def get_account_value_async(self) -> float:
         await self._sync_state()
-        margin_balance = self._account_data.get("marginBalance")
+        margin_balance = optional_strict_decimal(
+            self._account_data.get("marginBalance"), "marginBalance", error_cls=UnknownOutcome
+        )
         if margin_balance is not None:
             return float(margin_balance)
-        balance = float(self._account_data.get("balance", 0))
-        upnl = float(self._account_data.get("totalUnrealizedPnl", 0))
-        isolated = float(self._account_data.get("isolatedPositionMargin", 0))
-        return balance + upnl + isolated
+        balance = strict_decimal(
+            self._account_data.get("balance"), "balance", error_cls=UnknownOutcome
+        )
+        upnl = (
+            optional_strict_decimal(
+                self._account_data.get("totalUnrealizedPnl"),
+                "totalUnrealizedPnl",
+                error_cls=UnknownOutcome,
+            )
+            or Decimal("0")
+        )
+        isolated = (
+            optional_strict_decimal(
+                self._account_data.get("isolatedPositionMargin"),
+                "isolatedPositionMargin",
+                error_cls=UnknownOutcome,
+            )
+            or Decimal("0")
+        )
+        return float(exact_decimal_sum(balance, upnl, isolated))
 
     async def get_cash_async(self) -> float:
         await self._sync_state()
-        available = self._account_data.get("availableBalance")
+        available = optional_strict_decimal(
+            self._account_data.get("availableBalance"),
+            "availableBalance",
+            error_cls=UnknownOutcome,
+        )
         if available is not None:
             return float(available)
-        return float(self._account_data.get("balance", 0))
+        return float(
+            strict_decimal(
+                self._account_data.get("balance"),
+                "balance",
+                error_cls=UnknownOutcome,
+            )
+        )
 
     async def submit_order_async(
         self,
@@ -475,15 +545,18 @@ class ProprLiveBroker:
         if not self._connected:
             raise RuntimeError("Broker not connected. Call connect() first.")
 
+        requested_reduce_only = kwargs.pop("reduce_only", False)
+        if not isinstance(requested_reduce_only, bool):
+            raise ValueError(f"reduce_only must be a bool, got {requested_reduce_only!r}")
+        kwargs.pop("reducing_risk", None)
+        kwargs.pop("intent_idempotency_key", None)
+        if kwargs:
+            raise ValueError(f"Unsupported order arguments: {', '.join(sorted(kwargs))}")
+
         base, quote = (asset.split("/", 1) if "/" in asset else (asset, "USDC"))
         propr_asset = base
 
-        if side is None:
-            order_side = OrderSide.BUY if quantity > 0 else OrderSide.SELL
-            qty = abs(quantity)
-        else:
-            order_side = OrderSide(side)
-            qty = abs(quantity)
+        qty, order_side = _resolve_quantity_and_side(quantity, side)
 
         await self._sync_state()
         existing = (
@@ -492,7 +565,7 @@ class ProprLiveBroker:
             or self._positions.get(base)
         )
         position_side = "long"
-        reduce_only = False
+        reduce_only = requested_reduce_only
         if existing and existing.quantity != 0:
             if existing.quantity > 0:
                 position_side = "long"
@@ -514,11 +587,9 @@ class ProprLiveBroker:
             api_order_type = "limit"
         else:
             api_order_type = "market"
-        # Stage intent into durable SQLite WAL before network transmission
         pos_id = (
             getattr(existing, "_position_id", None)
             or getattr(existing, "position_id", None)
-            or f"pos-{propr_asset}"
         )
 
         account_id = getattr(self.client, "account_id", None) or self._target_account_id or "default"
@@ -584,9 +655,14 @@ class ProprLiveBroker:
         raise UnknownOutcome("Cancel/fill cutoff unverified; replacement requires reconciliation")
 
     async def close_position_async(self, asset: str) -> Any | None:
-        base, quote = (asset.split("/", 1) if "/" in asset else (asset, "USDC"))
-        orders = await asyncio.to_thread(self.client.close_position, base=base, quote=quote)
-        await self._sync_state()
-        if not orders:
+        pos = await self.get_position_async(asset)
+        if pos is None or pos.quantity == 0:
             return None
-        return self._parse_order(orders[0])
+        close_side = OrderSide.SELL if pos.quantity > 0 else OrderSide.BUY
+        return await self.submit_order_async(
+            asset=asset,
+            quantity=abs(pos.quantity),
+            side=close_side,
+            order_type=OrderType.MARKET,
+            reduce_only=True,
+        )

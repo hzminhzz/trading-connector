@@ -202,7 +202,7 @@ def test_real_sdk_shape_test_double_buy_then_reduce_only_close(tmp_path, monkeyp
     assert [p["quantity"] for p in fake.order_calls] == [str(QTY), str(QTY)]
     assert fake.get_open_positions() == []
     assert journal.has_unknown() is False
-    assert journal.connection.execute("SELECT COUNT(*) FROM intents").fetchone()[0] == 2
+    assert journal.count() == 2
     with pytest.raises(PermissionError, match="CANARY_ALREADY_ATTEMPTED"):
         execute_once(fake, ACCOUNT, journal, signal, Decimal("86.0735"))
     assert len(fake.order_calls) == 2
@@ -217,10 +217,7 @@ def test_rejected_market_order_never_sends_second_order(tmp_path):
     assert report["opening"]["status"] == "rejected"
     assert report["close"] == "NOT_APPLICABLE_OPENING_NOT_FILLED"
     assert len(fake.order_calls) == 1
-    assert (
-        journal.connection.execute("SELECT state FROM intents").fetchone()[0]
-        == "rejected"
-    )
+    assert journal.states() == ["rejected"]
     journal.close()
 
 
@@ -249,5 +246,5 @@ def test_price_and_signal_guard_fail_before_any_mutation(tmp_path):
     with pytest.raises(ValueError, match="NOT_A_VERIFIED_INITIAL_HOLDING_MESSAGE"):
         execute_once(fake, ACCOUNT, journal, broken, Decimal("86"))
     assert fake.order_calls == []
-    assert journal.connection.execute("SELECT COUNT(*) FROM intents").fetchone()[0] == 0
+    assert journal.count() == 0
     journal.close()
