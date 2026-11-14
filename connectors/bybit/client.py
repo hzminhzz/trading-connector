@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+from decimal import Decimal
 from typing import Any
 
 import ccxt.async_support as ccxta
@@ -12,6 +13,7 @@ from connectors.bybit.models import (
     BybitAuthenticationError,
     BybitBalance,
     BybitError,
+    BybitExecutionData,
     BybitInsufficientFundsError,
     BybitInvalidOrderError,
     BybitNetworkError,
@@ -23,7 +25,7 @@ from connectors.bybit.models import (
 )
 from connectors.ccxt_support.client import BaseCCXTClient
 from connectors.ccxt_support.models import CCXTErrorSpec
-from connectors.common.validation import strict_decimal
+from connectors.common.validation import required_text, strict_decimal
 
 logger = logging.getLogger(__name__)
 
@@ -303,6 +305,368 @@ class BybitClient(BaseCCXTClient):
             raise BybitSnapshotError("demo_orders: duplicate order ID")
         return orders
 
+    @staticmethod
+    def _extract_unified_account_record(raw_balance: dict[str, Any]) -> dict[str, Any]:
+        """Extract the single UNIFIED account info record from a CCXT balance payload."""
+        if not isinstance(raw_balance, dict):
+            raise BybitSnapshotError("demo_wallet_ccxt: invalid balance payload")
+        info = raw_balance.get("info")
+        if not isinstance(info, dict):
+            raise BybitSnapshotError("demo_wallet_ccxt: missing raw info payload")
+        candidates: Any = None
+        result = info.get("result")
+        if isinstance(result, dict) and isinstance(result.get("list"), list):
+            candidates = result["list"]
+        elif isinstance(info.get("list"), list):
+            candidates = info["list"]
+        elif isinstance(info.get("data"), list):
+            candidates = info["data"]
+        if not isinstance(candidates, list) or len(candidates) != 1:
+            raise BybitSnapshotError("demo_wallet_ccxt: expected one UNIFIED account record")
+        account = candidates[0]
+        if not isinstance(account, dict):
+            raise BybitSnapshotError("demo_wallet_ccxt: invalid account record")
+        account_type = account.get("accountType")
+        if account_type not in (None, "UNIFIED"):
+            raise BybitSnapshotError("demo_wallet_ccxt: account type mismatch")
+        if account_type is None and "totalEquity" not in account:
+            raise BybitSnapshotError("demo_wallet_ccxt: missing UNIFIED equity field")
+        return account
+
+    @classmethod
+    def parse_ccxt_account_summary(cls, raw_balance: dict[str, Any]) -> BybitAccountSummary:
+        """Parse exact UNIFIED Decimal conservation and margin fields from CCXT balance data."""
+        account = cls._extract_unified_account_record(raw_balance)
+        required_fields = (
+            "totalEquity",
+            "totalAvailableBalance",
+            "totalWalletBalance",
+            "totalPerpUPL",
+            "totalInitialMargin",
+            "totalMaintenanceMargin",
+        )
+        parsed: dict[str, Decimal] = {}
+        for field_name in required_fields:
+            if field_name not in account or account[field_name] in (None, ""):
+                raise BybitSnapshotError(f"demo_wallet_ccxt: missing {field_name}")
+            parsed[field_name] = strict_decimal(
+                account[field_name], f"ccxt.{field_name}", error_cls=BybitError
+            )
+        return BybitAccountSummary(
+            equity_usd=parsed["totalEquity"],
+            available_usd=parsed["totalAvailableBalance"],
+            wallet_balance_usd=parsed["totalWalletBalance"],
+            unrealized_pnl_usd=parsed["totalPerpUPL"],
+            initial_margin_usd=parsed["totalInitialMargin"],
+            maintenance_margin_usd=parsed["totalMaintenanceMargin"],
+        )
+
+    @staticmethod
+    def _coerce_bool_flag(value: object, default: bool = False) -> bool:
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, int) and value in (0, 1):
+            return bool(value)
+        if isinstance(value, str):
+            norm = value.strip().lower()
+            if norm in ("true", "1"):
+                return True
+            if norm in ("false", "0", ""):
+                return False
+        return default
+
+    def _parse_ccxt_position(self, row: dict[str, Any], *, category: str) -> BybitPositionData | None:
+        if not isinstance(row, dict):
+            raise BybitSnapshotError("demo_positions_ccxt: invalid row")
+        info = row.get("info") if isinstance(row.get("info"), dict) else {}
+        raw_size = info.get("size") if info.get("size") not in (None, "") else row.get("contracts")
+        size = strict_decimal(raw_size, "position.size", error_cls=BybitError)
+        if size < 0:
+            raise BybitSnapshotError("demo_positions_ccxt: negative position size")
+        if size == 0:
+            return None
+        pos_idx = info.get("positionIdx")
+        if category != "linear" or pos_idx not in (None, 0, "0"):
+            raise BybitSnapshotError("demo_positions_ccxt: active unsupported category/hedge position")
+        raw_side = info.get("side") or row.get("side")
+        side_norm = required_text(
+            raw_side, "position.side", allowed={"buy", "sell", "long", "short"}, error_cls=BybitError
+        )
+        if side_norm == "long":
+            side_norm = "buy"
+        elif side_norm == "short":
+            side_norm = "sell"
+        raw_symbol = info.get("symbol") or row.get("symbol")
+        symbol = (
+            self._demo_market_symbol(raw_symbol)
+            if isinstance(info.get("symbol"), str) and info.get("symbol")
+            else str(raw_symbol or "")
+        )
+        if not symbol:
+            raise BybitSnapshotError("demo_positions_ccxt: missing symbol")
+        entry_raw = info.get("avgPrice") if info.get("avgPrice") not in (None, "") else row.get("entryPrice")
+        mark_raw = info.get("markPrice") if info.get("markPrice") not in (None, "") else row.get("markPrice")
+        entry = strict_decimal(entry_raw, "position.entry_price", error_cls=BybitError)
+        mark = strict_decimal(mark_raw, "position.mark_price", error_cls=BybitError)
+        if entry <= 0 or mark <= 0:
+            raise BybitSnapshotError("demo_positions_ccxt: invalid entry/mark price")
+        upl_raw = info.get("unrealisedPnl") if info.get("unrealisedPnl") not in (None, "") else row.get("unrealizedPnl")
+        unrealized = (
+            strict_decimal(upl_raw, "position.unrealized_pnl", error_cls=BybitError)
+            if upl_raw not in (None, "")
+            else Decimal("0")
+        )
+        return BybitPositionData(
+            symbol=symbol,
+            side=side_norm,
+            size=size,
+            entry_price=entry,
+            mark_price=mark,
+            unrealized_pnl=unrealized,
+            leverage=Decimal("0"),
+            liquidation_price=None,
+            raw=row,
+        )
+
+    def parse_ccxt_order(self, row: dict[str, Any], *, category: str = "linear") -> BybitOrderData:
+        if not isinstance(row, dict):
+            raise BybitSnapshotError("demo_orders_ccxt: invalid order row")
+        info = row.get("info") if isinstance(row.get("info"), dict) else {}
+        if category != "linear":
+            raise BybitSnapshotError("demo_orders_ccxt: active unsupported category order")
+        pos_idx = info.get("positionIdx")
+        if pos_idx not in (None, 0, "0"):
+            raise BybitSnapshotError("demo_orders_ccxt: hedge mode order unsupported")
+        if info.get("stopOrderType") not in (None, "", "UNKNOWN"):
+            raise BybitSnapshotError("demo_orders_ccxt: conditional order not representable")
+        order_id = str(info.get("orderId") or row.get("id") or "").strip()
+        if not order_id:
+            raise BybitSnapshotError("demo_orders_ccxt: missing order ID")
+        raw_coid = info.get("orderLinkId")
+        if raw_coid in (None, ""):
+            raw_coid = row.get("clientOrderId")
+        client_order_id = str(raw_coid).strip() if isinstance(raw_coid, str) and raw_coid.strip() else None
+        native_symbol = info.get("symbol")
+        if isinstance(native_symbol, str) and native_symbol:
+            symbol = self._demo_market_symbol(native_symbol)
+        else:
+            symbol = str(row.get("symbol") or "").strip()
+        if not symbol:
+            raise BybitSnapshotError("demo_orders_ccxt: missing symbol")
+        side = required_text(info.get("side") or row.get("side"), "order.side", allowed={"buy", "sell"}, error_cls=BybitError)
+        order_type = required_text(
+            info.get("orderType") or row.get("type"), "order.type", allowed={"market", "limit"}, error_cls=BybitError
+        )
+        qty_raw = info.get("qty") if info.get("qty") not in (None, "") else row.get("amount")
+        filled_raw = info.get("cumExecQty") if info.get("cumExecQty") not in (None, "") else row.get("filled", "0")
+        price_raw = info.get("price") if info.get("price") not in (None, "") else row.get("price")
+        qty = strict_decimal(qty_raw, "order.quantity", error_cls=BybitError)
+        filled = strict_decimal(filled_raw, "order.filled_quantity", error_cls=BybitError)
+        price = strict_decimal(price_raw, "order.price", error_cls=BybitError) if price_raw not in (None, "", 0, "0") else None
+        if qty <= 0 or filled < 0 or filled > qty or (price is not None and price <= 0):
+            raise BybitSnapshotError("demo_orders_ccxt: inconsistent quantity/price")
+        raw_status = str(info.get("orderStatus") or row.get("status") or "").strip().lower()
+        status_map = {
+            "new": "open",
+            "open": "open",
+            "partiallyfilled": "partially_filled",
+            "partially_filled": "partially_filled",
+            "filled": "filled",
+            "closed": "filled",
+            "cancelled": "canceled",
+            "canceled": "canceled",
+            "rejected": "rejected",
+            "deactivated": "expired",
+            "expired": "expired",
+        }
+        status = status_map.get(raw_status)
+        if status is None:
+            raise BybitSnapshotError(f"demo_orders_ccxt: unsupported order status {raw_status!r}")
+        ts_raw = row.get("timestamp") if row.get("timestamp") is not None else info.get("createdTime")
+        ts = int(ts_raw) if ts_raw not in (None, "") else 0
+        reduce_only = self._coerce_bool_flag(
+            row.get("reduceOnly") if row.get("reduceOnly") is not None else info.get("reduceOnly")
+        )
+        return BybitOrderData(
+            order_id=order_id,
+            client_order_id=client_order_id,
+            symbol=symbol,
+            side=side,
+            order_type=order_type,
+            price=price,
+            quantity=qty,
+            filled_quantity=filled,
+            status=status,
+            timestamp=ts,
+            raw=row,
+            reduce_only=reduce_only,
+        )
+
+    def parse_ccxt_execution(self, row: dict[str, Any]) -> BybitExecutionData:
+        if not isinstance(row, dict):
+            raise BybitSnapshotError("demo_executions_ccxt: invalid execution row")
+        info = row.get("info") if isinstance(row.get("info"), dict) else {}
+        exec_id = str(info.get("execId") or row.get("id") or "").strip()
+        order_id = str(info.get("orderId") or row.get("order") or "").strip()
+        if not exec_id or not order_id:
+            raise BybitSnapshotError("demo_executions_ccxt: missing execId or orderId")
+        raw_coid = info.get("orderLinkId")
+        if raw_coid in (None, ""):
+            raw_coid = row.get("clientOrderId")
+        client_order_id = str(raw_coid).strip() if isinstance(raw_coid, str) and raw_coid.strip() else None
+        native_symbol = info.get("symbol")
+        if isinstance(native_symbol, str) and native_symbol:
+            symbol = self._demo_market_symbol(native_symbol)
+        else:
+            symbol = str(row.get("symbol") or "").strip()
+        if not symbol:
+            raise BybitSnapshotError("demo_executions_ccxt: missing symbol")
+        side = required_text(info.get("side") or row.get("side"), "execution.side", allowed={"buy", "sell"}, error_cls=BybitError)
+        qty_raw = info.get("execQty") if info.get("execQty") not in (None, "") else row.get("amount")
+        price_raw = info.get("execPrice") if info.get("execPrice") not in (None, "") else row.get("price")
+        fee_dict = row.get("fee") if isinstance(row.get("fee"), dict) else {}
+        fee_raw = info.get("execFee") if info.get("execFee") not in (None, "") else fee_dict.get("cost")
+        qty = strict_decimal(qty_raw, "execution.quantity", error_cls=BybitError)
+        price = strict_decimal(price_raw, "execution.price", error_cls=BybitError)
+        fee = strict_decimal(fee_raw, "execution.fee", error_cls=BybitError)
+        if qty <= 0 or price <= 0:
+            raise BybitSnapshotError("demo_executions_ccxt: non-positive execution qty/price")
+        ts_raw = row.get("timestamp") if row.get("timestamp") is not None else info.get("execTime")
+        try:
+            ts_ms = int(ts_raw)
+        except (TypeError, ValueError) as exc:
+            raise BybitSnapshotError("demo_executions_ccxt: invalid execution timestamp") from exc
+        if ts_ms <= 0:
+            raise BybitSnapshotError("demo_executions_ccxt: non-positive execution timestamp")
+        fee_currency = info.get("feeCurrency") or fee_dict.get("currency")
+        return BybitExecutionData(
+            execution_id=exec_id,
+            order_id=order_id,
+            client_order_id=client_order_id,
+            symbol=symbol,
+            side=side,
+            quantity=qty,
+            price=price,
+            fee=fee,
+            fee_currency=str(fee_currency) if fee_currency else None,
+            timestamp_ms=ts_ms,
+            raw=row,
+        )
+
+    async def fetch_server_time_ms(self) -> int:
+        """Read authoritative exchange server time in epoch milliseconds via CCXT."""
+        try:
+            server_ms = await self.exchange.fetch_time()
+            if not isinstance(server_ms, int) or isinstance(server_ms, bool) or server_ms <= 0:
+                raise BybitSnapshotError("demo_time: invalid server timestamp")
+            return server_ms
+        except Exception as exc:
+            raise self._wrap_exception(exc) from exc
+
+    async def fetch_demo_account_summary_ccxt(self) -> BybitAccountSummary:
+        """Read UNIFIED equity, cash, unrealized PnL, and margin totals via CCXT."""
+        if not self.demo_identity_verified:
+            raise BybitSnapshotError("demo_wallet_ccxt: authenticated Demo identity not verified")
+        try:
+            raw_balance = await self.exchange.fetch_balance(params={"type": "unified"})
+            return self.parse_ccxt_account_summary(raw_balance)
+        except Exception as exc:
+            raise self._wrap_exception(exc) from exc
+
+    async def fetch_demo_positions_ccxt(self) -> list[BybitPositionData]:
+        """Read all active positions via CCXT and fail closed on non-linear/hedge exposure."""
+        if not self.demo_identity_verified:
+            raise BybitSnapshotError("demo_positions_ccxt: authenticated Demo identity not verified")
+        positions: list[BybitPositionData] = []
+        seen_symbols: set[str] = set()
+        try:
+            scopes: tuple[tuple[str, dict[str, Any]], ...] = (
+                ("linear", {"type": "swap", "subType": "linear", "settleCoin": "USDT", "paginate": True, "limit": 200}),
+                ("linear", {"type": "swap", "subType": "linear", "settleCoin": "USDC", "paginate": True, "limit": 200}),
+                ("inverse", {"type": "swap", "subType": "inverse", "paginate": True, "limit": 200}),
+                ("option", {"type": "option", "paginate": True, "limit": 200}),
+            )
+            for category, params in scopes:
+                rows = await self.exchange.fetch_positions(params=params)
+                if not isinstance(rows, list):
+                    raise BybitSnapshotError("demo_positions_ccxt: invalid positions list")
+                for row in rows:
+                    parsed = self._parse_ccxt_position(row, category=category)
+                    if parsed is None:
+                        continue
+                    if parsed.symbol in seen_symbols:
+                        raise BybitSnapshotError("demo_positions_ccxt: duplicate instrument position")
+                    seen_symbols.add(parsed.symbol)
+                    positions.append(parsed)
+            return positions
+        except Exception as exc:
+            raise self._wrap_exception(exc) from exc
+
+    async def fetch_demo_orders_ccxt(self, since_ms: int | None = None) -> list[BybitOrderData]:
+        """Read open plus canceled/closed linear orders via CCXT and reject unsupported active categories."""
+        if not self.demo_identity_verified:
+            raise BybitSnapshotError("demo_orders_ccxt: authenticated Demo identity not verified")
+        orders_by_id: dict[str, BybitOrderData] = {}
+        try:
+            open_scopes: tuple[tuple[str, dict[str, Any]], ...] = (
+                ("linear", {"type": "swap", "subType": "linear", "settleCoin": "USDT", "paginate": True, "limit": 50}),
+                ("linear", {"type": "swap", "subType": "linear", "settleCoin": "USDC", "paginate": True, "limit": 50}),
+                ("inverse", {"type": "swap", "subType": "inverse", "paginate": True, "limit": 50}),
+                ("spot", {"type": "spot", "paginate": True, "limit": 50}),
+                ("option", {"type": "option", "paginate": True, "limit": 50}),
+            )
+            for category, params in open_scopes:
+                rows = await self.exchange.fetch_open_orders(params=params)
+                if not isinstance(rows, list):
+                    raise BybitSnapshotError("demo_orders_ccxt: invalid open orders response")
+                for row in rows:
+                    parsed = self.parse_ccxt_order(row, category=category)
+                    orders_by_id[parsed.order_id] = parsed
+            history_scopes = (
+                {"type": "swap", "subType": "linear", "settleCoin": "USDT", "paginate": True, "limit": 50},
+                {"type": "swap", "subType": "linear", "settleCoin": "USDC", "paginate": True, "limit": 50},
+            )
+            for params in history_scopes:
+                rows = await self.exchange.fetch_canceled_and_closed_orders(since=since_ms, params=params)
+                if not isinstance(rows, list):
+                    raise BybitSnapshotError("demo_orders_ccxt: invalid history orders response")
+                for row in rows:
+                    parsed = self.parse_ccxt_order(row, category="linear")
+                    if parsed.order_id not in orders_by_id:
+                        orders_by_id[parsed.order_id] = parsed
+            return list(orders_by_id.values())
+        except Exception as exc:
+            raise self._wrap_exception(exc) from exc
+
+    async def fetch_demo_executions_ccxt(
+        self,
+        since_ms: int | None = None,
+        symbol: str | None = None,
+    ) -> list[BybitExecutionData]:
+        """Read actual linear trade executions via CCXT, deduplicated by execId."""
+        if not self.demo_identity_verified:
+            raise BybitSnapshotError("demo_executions_ccxt: authenticated Demo identity not verified")
+        execs_by_id: dict[str, BybitExecutionData] = {}
+        try:
+            scopes = (
+                ({"type": "swap", "subType": "linear", "settleCoin": "USDT", "paginate": True, "limit": 100},)
+                if symbol is not None
+                else (
+                    {"type": "swap", "subType": "linear", "settleCoin": "USDT", "paginate": True, "limit": 100},
+                    {"type": "swap", "subType": "linear", "settleCoin": "USDC", "paginate": True, "limit": 100},
+                )
+            )
+            for params in scopes:
+                rows = await self.exchange.fetch_my_trades(symbol=symbol, since=since_ms, params=params)
+                if not isinstance(rows, list):
+                    raise BybitSnapshotError("demo_executions_ccxt: invalid executions response")
+                for row in rows:
+                    parsed = self.parse_ccxt_execution(row)
+                    execs_by_id[parsed.execution_id] = parsed
+            return sorted(execs_by_id.values(), key=lambda ex: (ex.timestamp_ms, ex.execution_id))
+        except Exception as exc:
+            raise self._wrap_exception(exc) from exc
+
     async def connect(self) -> None:
         """Initialize markets and authenticate an explicitly selected Demo account."""
         self._connected = False
@@ -376,3 +740,41 @@ class BybitClient(BaseCCXTClient):
         parsed = self.parse_order_row(merged, allow_terminal=True)
         parsed.raw = raw
         return parsed
+
+    async def create_order(
+        self,
+        symbol: str,
+        side: str,
+        order_type: str,
+        amount: float,
+        price: float | None = None,
+        reduce_only: bool = False,
+        client_order_id: str | None = None,
+        params: dict[str, Any] | None = None,
+    ) -> BybitOrderData:
+        """Place a single order on Bybit with optional orderLinkId validation."""
+        order_params: dict[str, Any] = dict(params or {})
+        if client_order_id is not None:
+            normalized_coid = client_order_id.strip()
+            if not normalized_coid or len(normalized_coid) > 36:
+                raise BybitInvalidOrderError(
+                    "client_order_id must be 1..36 characters for Bybit orderLinkId"
+                )
+            existing_coid = order_params.get("orderLinkId")
+            if existing_coid is not None and str(existing_coid) != normalized_coid:
+                raise BybitInvalidOrderError("Conflicting orderLinkId and client_order_id")
+            order_params["orderLinkId"] = normalized_coid
+        order = await super().create_order(
+            symbol=symbol,
+            side=side,
+            order_type=order_type,
+            amount=amount,
+            price=price,
+            reduce_only=reduce_only,
+            params=order_params,
+        )
+        if not order.client_order_id and "orderLinkId" in order_params:
+            order.client_order_id = str(order_params["orderLinkId"])
+        raw_ro = order.raw.get("reduceOnly") if isinstance(order.raw, dict) else None
+        order.reduce_only = self._coerce_bool_flag(raw_ro, default=reduce_only)
+        return order

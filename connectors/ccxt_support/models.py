@@ -80,3 +80,4 @@ class CCXTOrderData:
     status: str
     timestamp: int
     raw: dict[str, Any]
+    reduce_only: bool = False

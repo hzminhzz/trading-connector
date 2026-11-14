@@ -50,8 +50,48 @@ class BybitAccountSummary:
     equity_usd: Decimal
     available_usd: Decimal
     raw: dict[str, Any] = field(default_factory=dict)
+    wallet_balance_usd: Decimal | None = None
+    unrealized_pnl_usd: Decimal | None = None
+    initial_margin_usd: Decimal | None = None
+    maintenance_margin_usd: Decimal | None = None
 
 
 BybitBalance = CCXTBalance
 BybitPositionData = CCXTPositionData
 BybitOrderData = CCXTOrderData
+
+
+@dataclass(frozen=True)
+class BybitExecutionData:
+    execution_id: str
+    order_id: str
+    client_order_id: str | None
+    symbol: str
+    side: str
+    quantity: Decimal
+    price: Decimal
+    fee: Decimal
+    fee_currency: str | None
+    timestamp_ms: int
+    raw: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class BybitDemoReconciliationSnapshot:
+    endpoint: str
+    observed_at_ms: int
+    received_at_ms: int
+    server_time_ms: int
+    epoch: int
+    connected: bool
+    history_complete: bool
+    financial_complete: bool
+    cutoff: str | None
+    account: BybitAccountSummary | None
+    positions: tuple[BybitPositionData, ...]
+    orders: tuple[BybitOrderData, ...]
+    executions: tuple[BybitExecutionData, ...]
+    market_marks: tuple[tuple[str, Decimal, int], ...]
+    native_account_id: str | None = None
+    native_account_source: str | None = None
+    uncertainty_reasons: tuple[str, ...] = ()
